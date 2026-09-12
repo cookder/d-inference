@@ -263,6 +263,8 @@ func preflightScanWait(deadline time.Duration) time.Duration {
 func (s *Server) runInferenceAdmission(w http.ResponseWriter, r *http.Request, parsed map[string]any, p inferenceAdmissionParams) (string, bool) {
 	markPublicModelDemand(r, p)
 	model := p.model
+	armAutopilotDemand(r, p)
+	defer func() { setAutopilotDemandModel(r, model) }()
 	publicModel := p.publicModel
 	refundReservation := p.refundReservation
 	requestTraits := func() registry.RequestTraits {

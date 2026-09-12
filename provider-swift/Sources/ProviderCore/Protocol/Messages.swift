@@ -183,6 +183,7 @@ public enum ProviderMessage: Sendable, Equatable {
     case codeAttestationResponse(CodeAttestationResponse)
     case appAttestShadow(AppAttestShadowPayload)
     case loadModelStatus(LoadModelStatus)
+    case modelAutopilotStatus(ModelAutopilotStatus)
     case prefetchModelStatus(PrefetchModelStatus)
     case modelsUpdate(ModelsUpdate)
     case modelsReplace(ModelsReplace)
@@ -194,6 +195,7 @@ public enum ProviderMessage: Sendable, Equatable {
     case capacityQuote(CapacityQuote)
 
     public struct Register: Sendable, Equatable {
+        public var modelAutopilot: ModelAutopilotSnapshot?
         public var hardware: HardwareInfo
         public var models: [ModelInfo]
         public var backend: String
@@ -258,8 +260,10 @@ public enum ProviderMessage: Sendable, Equatable {
             prefixCacheDonationOutcomes: [PrefixCacheDonationOutcomeCount]? = nil,
             toolConstraintProtocol: Int? = nil,
             toolConstraintModels: [String]? = nil,
-            appAttestProtocol: Int? = nil
+            appAttestProtocol: Int? = nil,
+            modelAutopilot: ModelAutopilotSnapshot? = nil
         ) {
+            self.modelAutopilot = modelAutopilot
             self.hardware = hardware
             self.models = models
             self.backend = backend
@@ -291,6 +295,7 @@ public enum ProviderMessage: Sendable, Equatable {
     }
 
     public struct Heartbeat: Sendable, Equatable {
+        public var modelAutopilot: ModelAutopilotSnapshot?
         public var status: ProviderStatus
         public var activeModel: String?
         public var warmModels: [String]
@@ -332,7 +337,8 @@ public enum ProviderMessage: Sendable, Equatable {
             prefixCacheMemoryModels: [PrefixCacheV2Capability]? = nil,
             prefixCacheStatuses: [PrefixCacheModelStatus]? = nil,
             prefixCacheDonationOutcomes: [PrefixCacheDonationOutcomeCount]? = nil,
-            idleUnloadMins: UInt64? = nil
+            idleUnloadMins: UInt64? = nil,
+            modelAutopilot: ModelAutopilotSnapshot? = nil
         ) {
             self.status = status
             self.activeModel = activeModel
@@ -348,6 +354,7 @@ public enum ProviderMessage: Sendable, Equatable {
             self.prefixCacheStatuses = prefixCacheStatuses
             self.prefixCacheDonationOutcomes = prefixCacheDonationOutcomes
             self.idleUnloadMins = idleUnloadMins
+            self.modelAutopilot = modelAutopilot
         }
     }
 
@@ -862,6 +869,7 @@ extension ProviderMessage: Codable {
         case codeAttestationResponse = "code_attestation_response"
         case appAttestShadow = "app_attest_shadow"
         case loadModelStatus = "load_model_status"
+        case modelAutopilotStatus = "model_autopilot_status"
         case prefetchModelStatus = "prefetch_model_status"
         case modelsUpdate = "models_update"
         case modelsReplace = "models_replace"
@@ -901,6 +909,7 @@ extension ProviderMessage: Codable {
         case prefixCacheDonationOutcomes = "prefix_cache_donation_outcomes"
         case toolConstraintProtocol = "tool_constraint_protocol"
         case toolConstraintModels = "tool_constraint_models"
+        case modelAutopilot = "model_autopilot"
         // Heartbeat
         case status
         case activeModel = "active_model"
@@ -979,8 +988,13 @@ extension ProviderMessage: Codable {
         case .drainBarrier(let id):
             try container.encode(TypeValue.drainBarrier, forKey: .type)
             try container.encode(id, forKey: .requestId)
+        case .modelAutopilotStatus(let status):
+            try status.encode(to: encoder)
+            try container.encode(TypeValue.modelAutopilotStatus, forKey: .type)
+
         case .register(let r):
             try container.encode(TypeValue.register, forKey: .type)
+            try container.encodeIfPresent(r.modelAutopilot, forKey: .modelAutopilot)
             try container.encode(r.hardware, forKey: .hardware)
             try container.encode(r.models, forKey: .models)
             try container.encode(r.backend, forKey: .backend)
@@ -1025,6 +1039,7 @@ extension ProviderMessage: Codable {
 
         case .heartbeat(let h):
             try container.encode(TypeValue.heartbeat, forKey: .type)
+            try container.encodeIfPresent(h.modelAutopilot, forKey: .modelAutopilot)
             try container.encode(h.status, forKey: .status)
             try container.encodeIfPresent(h.activeModel, forKey: .activeModel)
             if !h.warmModels.isEmpty {
@@ -1248,6 +1263,9 @@ extension ProviderMessage: Codable {
         switch type {
         case .drainBarrier:
             self = .drainBarrier(try container.decode(String.self, forKey: .requestId))
+        case .modelAutopilotStatus:
+            self = .modelAutopilotStatus(try ModelAutopilotStatus(from: decoder))
+
         case .register:
             self = .register(Register(
                 hardware: try container.decode(HardwareInfo.self, forKey: .hardware),
@@ -1284,7 +1302,8 @@ extension ProviderMessage: Codable {
                     Int.self, forKey: .toolConstraintProtocol),
                 toolConstraintModels: try container.decodeIfPresent(
                     [String].self, forKey: .toolConstraintModels),
-                appAttestProtocol: try container.decodeIfPresent(Int.self, forKey: .appAttestProtocol)
+                appAttestProtocol: try container.decodeIfPresent(Int.self, forKey: .appAttestProtocol),
+                modelAutopilot: try container.decodeIfPresent(ModelAutopilotSnapshot.self, forKey: .modelAutopilot)
             ))
 
         case .heartbeat:
@@ -1308,7 +1327,8 @@ extension ProviderMessage: Codable {
                 prefixCacheDonationOutcomes: try container.decodeIfPresent(
                     [PrefixCacheDonationOutcomeCount].self,
                     forKey: .prefixCacheDonationOutcomes),
-                idleUnloadMins: try container.decodeIfPresent(UInt64.self, forKey: .idleUnloadMins)
+                idleUnloadMins: try container.decodeIfPresent(UInt64.self, forKey: .idleUnloadMins),
+                modelAutopilot: try container.decodeIfPresent(ModelAutopilotSnapshot.self, forKey: .modelAutopilot)
             ))
 
         case .inferenceAccepted:
@@ -1535,6 +1555,7 @@ public enum CoordinatorMessage: Sendable, Equatable {
     case appAttestShadow(AppAttestShadowPayload)
     case runtimeStatus(RuntimeStatus)
     case loadModel(LoadModel)
+    case modelAutopilot(ModelAutopilotCommand)
     case prefetchModel(PrefetchModel)
     case desiredModels(DesiredModels)
     case trustStatus(TrustStatus)
@@ -1732,6 +1753,7 @@ extension CoordinatorMessage: Codable {
         case appAttestShadow = "app_attest_shadow"
         case runtimeStatus = "runtime_status"
         case loadModel = "load_model"
+        case modelAutopilot = "model_autopilot"
         case prefetchModel = "prefetch_model"
         case desiredModels = "desired_models"
         case trustStatus = "trust_status"
@@ -1821,6 +1843,10 @@ extension CoordinatorMessage: Codable {
             if !s.mismatches.isEmpty {
                 try container.encode(s.mismatches, forKey: .mismatches)
             }
+
+        case .modelAutopilot(let command):
+            try command.encode(to: encoder)
+            try container.encode(TypeValue.modelAutopilot, forKey: .type)
 
         case .loadModel(let l):
             try container.encode(TypeValue.loadModel, forKey: .type)
@@ -1935,6 +1961,9 @@ extension CoordinatorMessage: Codable {
                 verified: try container.decode(Bool.self, forKey: .verified),
                 mismatches: try container.decodeIfPresent([RuntimeMismatch].self, forKey: .mismatches) ?? []
             ))
+
+        case .modelAutopilot:
+            self = .modelAutopilot(try ModelAutopilotCommand(from: decoder))
 
         case .loadModel:
             self = .loadModel(LoadModel(
