@@ -6,12 +6,14 @@ import (
 	"sort"
 	"time"
 
+	"github.com/eigeninference/d-inference/coordinator/autopilot"
 	"github.com/eigeninference/d-inference/coordinator/protocol"
 	"github.com/eigeninference/d-inference/coordinator/saferun"
 	"nhooyr.io/websocket"
-
-	"github.com/eigeninference/d-inference/coordinator/autopilot"
 )
+
+// DefaultProviderHeartbeatTimeout is the normal serving liveness window.
+const DefaultProviderHeartbeatTimeout = 90 * time.Second
 
 // Register adds a new provider to the registry, returning its assigned ID.
 // Provider-reported model inventory is preserved even when the current catalog

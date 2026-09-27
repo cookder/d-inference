@@ -340,7 +340,8 @@ change; programmatic configuration fields are validated by `autopilot.Config.Che
 
 | Field / rule | Default or bound | Source |
 |---|---|---|
-| `MaxSnapshotAge` | `30s` | `coordinator/autopilot/config.go`, `DefaultConfig` |
+| `MaxSnapshotAge` | `30s` baseline for actively controlled providers; effective age is at least controller interval + `10s`, at most `70s` with valid config | `coordinator/autopilot/config.go`, `DefaultConfig`, `ControlSnapshotMaxAge` |
+| Ordinary/waiting/paused donor capacity | Normal `90s` serving heartbeat window; an accepted capacity sample is still required | `coordinator/registry/provider_lifecycle.go`, `DefaultProviderHeartbeatTimeout`; `autopilot_snapshot.go` |
 | `CommandAcceptTimeout` | `20s`; acceptance/first mutation, not total operation duration | `autopilot.DefaultConfig`; `provider-swift/Sources/ProviderCore/Autopilot/ProviderLoop+Autopilot.swift`, `checkAutopilotLoadOwnership` |
 | `CommandWatchdog` | `5m`; retain uncertain ownership rather than assume completion | `autopilot.DefaultConfig`; `coordinator/registry/autopilot_commands.go`, `markAutopilotWatchdogs` |
 | `FailureBackoff` | `2m` | `autopilot.DefaultConfig`; `coordinator/registry/autopilot_provider_state.go`, `reconcileAutopilotHeartbeatLocked` |

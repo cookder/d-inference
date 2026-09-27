@@ -15,7 +15,7 @@ type Config struct {
 	DemandWindow            time.Duration
 	MinDwell                time.Duration
 	IdleUnloadAfter         time.Duration
-	MaxSnapshotAge          time.Duration
+	MaxSnapshotAge          time.Duration // baseline active-control budget, resolved against renewal cadence
 	CommandAcceptTimeout    time.Duration
 	CommandWatchdog         time.Duration
 	FailureBackoff          time.Duration
@@ -37,6 +37,12 @@ func DefaultConfig() Config {
 		MaxActionsPerTick: 2, MaxConcurrentOperations: 4,
 		TargetUtilization: .7, MinBenefitSeconds: 30, AllowIdleUnload: true,
 	}
+}
+
+// ControlSnapshotMaxAge allows a controller interval plus delivery jitter.
+// The default remains 30s; a valid one-minute interval resolves to 70s.
+func (c Config) ControlSnapshotMaxAge() time.Duration {
+	return max(c.MaxSnapshotAge, c.Interval+10*time.Second)
 }
 
 func (c Config) Check() error {

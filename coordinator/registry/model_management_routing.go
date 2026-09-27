@@ -28,10 +28,9 @@ func providerAutopilotRoutingBlockedLocked(p *Provider, model string) bool {
 	return true
 }
 
-// Consent fencing is independent of the controller's enabled/shadow mode: an
-// opted-in provider explicitly delegates cold residency changes to managed
-// commands and refuses legacy commands itself. A hypothetical plan never sets
-// either predicate; only actual provider consent or a real operation does.
+// Active control or an explicit pause owns residency. Accepted commands retain
+// their fence until reconciliation. Consent without control keeps ordinary
+// serving policy, and a hypothetical plan never claims mutation ownership.
 func providerLegacyModelChangesBlockedLocked(p *Provider) bool {
 	return providerAutopilotManagedLocked(p) || providerAutopilotTransitionLocked(p)
 }

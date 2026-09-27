@@ -28,10 +28,11 @@ extension ProviderLoop {
     internal func startIdleMonitor() {
         idleMonitorTask?.cancel()
         idleMonitorTask = nil
-        // Explicit autopilot enrollment transfers idle-residency decisions to
-        // the controller. Keeping the old timer as a second authority would
+        // Active control or explicit pause transfers idle-residency decisions
+        // to Autopilot. Keeping the old timer as a second authority would
         // unload its warm floor each hour, followed by an immediate reload.
-        // The configured idle policy resumes unchanged after opting out.
+        // The configured idle policy resumes when control ends; accepted
+        // commands retain ownership through the tick's mutation guard.
         guard !autopilotManagesResidency else {
             logger.info("Idle residency is managed by model autopilot; local idle timer paused")
             return

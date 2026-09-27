@@ -341,7 +341,7 @@ func (s *Server) handleMyProviders(w http.ResponseWriter, r *http.Request) {
 		Providers:             fleet,
 		LatestProviderVersion: s.latestReleasedVersion(),
 		MinProviderVersion:    s.minProviderVersion,
-		HeartbeatTimeoutSec:   90,
+		HeartbeatTimeoutSec:   int(registry.DefaultProviderHeartbeatTimeout.Seconds()),
 		ChallengeMaxAgeSec:    int((6 * time.Minute).Seconds()),
 	}
 	writeJSON(w, http.StatusOK, resp)

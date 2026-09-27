@@ -45,7 +45,15 @@ func (r *Registry) autopilotFleetSnapshotLocked(c *modelAutopilotController, dem
 		p.mu.Lock()
 		n := autopilot.Node{ID: p.ID, Seq: p.capacitySeq, Managed: providerAutopilotManagedLocked(p) || (c.config.ObserveOnly && providerAutopilotConsentedLocked(p) && !p.ModelAutopilot.Paused), Pending: providerAutopilotTransitionLocked(p), MemoryPressure: p.SystemMetrics.MemoryPressure, Fits: map[string]autopilot.ModelFit{}}
 		n.Uncertain = p.autopilotPending != nil && p.autopilotPending.Uncertain
-		fresh := !p.capacitySamplesAt.IsZero() && now.Sub(p.capacitySamplesAt) <= c.config.MaxSnapshotAge && p.BackendCapacity != nil
+		maxAge := c.config.ControlSnapshotMaxAge()
+		if !providerAutopilotControlActiveLocked(p) {
+			// Ordinary, waiting, observed and explicitly paused providers may
+			// legitimately use a slower heartbeat. Preserve their donor credit
+			// through the normal serving window. Active control renewals force
+			// fresh capacity reports and retain the stricter mutation budget.
+			maxAge = max(maxAge, DefaultProviderHeartbeatTimeout)
+		}
+		fresh := !p.capacitySamplesAt.IsZero() && now.Sub(p.capacitySamplesAt) <= maxAge && p.BackendCapacity != nil
 		if !fresh || p.PrivateOnly {
 			f.Excluded["stale_or_private"]++
 			p.mu.Unlock()

@@ -61,6 +61,12 @@ slow connections cannot serialize renewal of healthy peers or the planning tick.
 Each accepted renewal explicitly rebuilds capacity and sends an event heartbeat,
 even when the slot contents are unchanged. With the default ten-second controller
 interval, a longer normal provider heartbeat interval does not delay this report.
+Actively controlled recipients retain the default thirty-second capacity budget.
+A custom controller interval raises that budget only as needed to cover one
+interval plus ten seconds of delivery grace (at most seventy seconds).
+Providers outside active control contribute donor capacity through the normal
+ninety-second serving heartbeat window, including ordinary, waiting and paused
+providers. A fresh liveness-only frame never refreshes an old capacity sample.
 Absent or expired control restores ordinary serving policy. An explicitly paused
 provider retains its resident set and accepts network work only on ready models.
 An accepted operation retains ownership until it finishes even after opt-out,

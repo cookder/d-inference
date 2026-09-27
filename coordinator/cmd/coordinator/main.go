@@ -884,7 +884,7 @@ func main() {
 	}
 
 	// Start background eviction of stale providers.
-	reg.StartEvictionLoop(ctx, 90*time.Second)
+	reg.StartEvictionLoop(ctx, registry.DefaultProviderHeartbeatTimeout)
 
 	// Push gauge values to DogStatsD periodically.
 	go srv.StartDDGaugeLoop(ctx)

@@ -9,8 +9,12 @@ import (
 )
 
 func providerAutopilotManagedLocked(p *Provider) bool {
-	return providerAutopilotConsentedLocked(p) && (p.ModelAutopilot.Paused || (p.ModelAutopilot.Active &&
-		p.ModelAutopilot.SessionID == p.ID && p.ModelAutopilot.Revision == p.autopilotControlRevision && time.Now().Before(p.autopilotControlUntil)))
+	return providerAutopilotConsentedLocked(p) && (p.ModelAutopilot.Paused || providerAutopilotControlActiveLocked(p))
+}
+
+func providerAutopilotControlActiveLocked(p *Provider) bool {
+	return providerAutopilotConsentedLocked(p) && p.ModelAutopilot.Active &&
+		p.ModelAutopilot.SessionID == p.ID && p.ModelAutopilot.Revision == p.autopilotControlRevision && time.Now().Before(p.autopilotControlUntil)
 }
 func providerAutopilotTransitionLocked(p *Provider) bool {
 	return p.autopilotPending != nil || (p.ModelAutopilot != nil && p.ModelAutopilot.ActiveCommandID != "")

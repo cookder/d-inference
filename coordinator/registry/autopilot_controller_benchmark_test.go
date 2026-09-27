@@ -2,12 +2,11 @@ package registry
 
 import (
 	"fmt"
+	"github.com/eigeninference/d-inference/coordinator/autopilot"
 	"github.com/eigeninference/d-inference/coordinator/protocol"
 	"sort"
 	"testing"
 	"time"
-
-	"github.com/eigeninference/d-inference/coordinator/autopilot"
 )
 
 // These benchmarks report operation wall time without contention. Reserve's

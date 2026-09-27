@@ -6,6 +6,24 @@ import (
 	"time"
 )
 
+func TestAutopilotFreshnessIncludesConfiguredControlCadence(t *testing.T) {
+	for _, tc := range []struct{ interval, age time.Duration }{
+		{time.Second, 30 * time.Second},
+		{10 * time.Second, 30 * time.Second},
+		{30 * time.Second, 40 * time.Second},
+		{time.Minute, 70 * time.Second},
+	} {
+		cfg := DefaultConfig()
+		cfg.Interval = tc.interval
+		if err := cfg.Check(); err != nil {
+			t.Fatal(err)
+		}
+		if got := cfg.ControlSnapshotMaxAge(); got != tc.age {
+			t.Fatalf("interval=%v snapshot age=%v want=%v", tc.interval, got, tc.age)
+		}
+	}
+}
+
 func TestAutopilotControllerConfigRejectsUnsafeTimingAndNumericSettings(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
