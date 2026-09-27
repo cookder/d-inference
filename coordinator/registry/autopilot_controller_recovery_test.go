@@ -3,12 +3,12 @@ package registry
 import (
 	"context"
 	"errors"
-	"math"
 	"reflect"
 	"slices"
 	"testing"
 	"time"
 
+	"github.com/eigeninference/d-inference/coordinator/autopilot"
 	"github.com/eigeninference/d-inference/coordinator/protocol"
 	"github.com/eigeninference/d-inference/coordinator/store"
 )
@@ -167,32 +167,6 @@ func TestAutopilotControllerTerminalStatusCannotFlipBeforeHeartbeat(t *testing.T
 	}
 }
 
-func TestAutopilotControllerConfigRejectsUnsafeTimingAndNumericSettings(t *testing.T) {
-	for _, tc := range []struct {
-		name   string
-		change func(*AutopilotConfig)
-	}{
-		{"zero snapshot freshness", func(c *AutopilotConfig) { c.MaxSnapshotAge = 0 }},
-		{"long stale snapshot", func(c *AutopilotConfig) { c.MaxSnapshotAge = time.Hour }},
-		{"expired acceptance", func(c *AutopilotConfig) { c.CommandAcceptTimeout = 0 }},
-		{"watchdog before acceptance", func(c *AutopilotConfig) { c.CommandWatchdog = time.Second }},
-		{"unbounded watchdog", func(c *AutopilotConfig) { c.CommandWatchdog = time.Hour }},
-		{"zero backoff", func(c *AutopilotConfig) { c.FailureBackoff = 0 }},
-		{"zero load prior", func(c *AutopilotConfig) { c.LoadTimePrior = 0 }},
-		{"nan utilization", func(c *AutopilotConfig) { c.TargetUtilization = math.NaN() }},
-		{"infinite benefit", func(c *AutopilotConfig) { c.MinBenefitSeconds = math.Inf(1) }},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			c := DefaultAutopilotConfig()
-			c.Enabled = true
-			tc.change(&c)
-			if c.Check() == nil {
-				t.Fatal("invalid active control policy accepted")
-			}
-		})
-	}
-}
-
 func TestAutopilotControllerNormalUnloadIsNotReportedAsUncertain(t *testing.T) {
 	reg, c, now := newAutopilotControllerTest(t, false)
 	p := autopilotControllerProvider(t, reg, "provider", now, autopilotTestDonor)
@@ -236,7 +210,7 @@ func TestAutopilotControllerFutureUsesOccupancyOnlyCoResidentWork(t *testing.T) 
 	p := autopilotControllerProvider(t, reg, "pending", now, autopilotTestDonor)
 	busy := autopilotControllerProvider(t, reg, "busy-donor", now, autopilotTestDonor)
 	for range 100 {
-		c.demand.record(AutopilotDemandSample{Model: autopilotTestTarget, ReceivedAt: now.Add(-time.Minute), PromptTokens: 32, RequestedMaxTokens: 64}, now, c.config.DemandWindow)
+		c.demand.Record(autopilot.DemandSample{Model: autopilotTestTarget, ReceivedAt: now.Add(-time.Minute), PromptTokens: 32, RequestedMaxTokens: 64}, now, c.config.DemandWindow)
 	}
 	p.mu.Lock()
 	p.autopilotPending = &autopilotPendingCommand{Command: protocol.ModelAutopilotMessage{CommandID: "pending-load", LoadModelID: autopilotTestTarget, ExpectedResidentModels: []string{autopilotTestDonor}, UnloadModelIDs: []string{}}, SentAt: now, CapacitySeq: 10, Status: "reserved"}
@@ -246,7 +220,7 @@ func TestAutopilotControllerFutureUsesOccupancyOnlyCoResidentWork(t *testing.T) 
 	busy.mu.Unlock()
 	f := reg.autopilotFleetSnapshot(c, now)
 	coverage := autopilotCoverage(f)
-	var pending autopilotNode
+	var pending autopilot.Node
 	for _, node := range f.Nodes {
 		if node.ID == p.ID {
 			pending = node
@@ -255,7 +229,7 @@ func TestAutopilotControllerFutureUsesOccupancyOnlyCoResidentWork(t *testing.T) 
 	if !slices.Contains(pending.FutureResidents, autopilotTestTarget) || !slices.Contains(pending.FutureResidents, autopilotTestDonor) {
 		t.Fatalf("runtime lost exact future serving set: %+v", pending.FutureResidents)
 	}
-	naive := autopilotNodeContribution(pending, pending.FutureResidents, f.Demand)
+	naive := autopilot.NodeContribution(pending, pending.FutureResidents, f.Demand)
 	if coverage.Future[autopilotTestDonor] <= 0 || autopilotModelRate(coverage.Future, autopilotTestTarget) >= autopilotModelRate(naive, autopilotTestTarget) {
 		t.Fatalf("pending target was overcredited by ignoring unfinished co-resident work: future=%+v raw-demand-only=%+v", coverage.Future, naive)
 	}
@@ -264,7 +238,7 @@ func TestAutopilotControllerFutureUsesOccupancyOnlyCoResidentWork(t *testing.T) 
 func autopilotModelRate(rates map[string]float64, model string) float64 {
 	var total float64
 	for key, rate := range rates {
-		if autopilotModel(key) == model {
+		if autopilot.ModelID(key) == model {
 			total += rate
 		}
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/eigeninference/d-inference/coordinator/autopilot"
 	"github.com/eigeninference/d-inference/coordinator/store"
 )
 
@@ -57,8 +58,8 @@ func (r *Registry) flushAutopilotEvents() bool {
 }
 
 func (r *Registry) recordAutopilotReservation(a autopilotAction, pending *autopilotPendingCommand) bool {
-	r.queueAutopilotEvent(store.AutopilotRecord{Reason: a.Reason, Shape: autopilotShapeLabel(a.Workload), CommandID: pending.Command.CommandID, At: pending.SentAt,
+	r.queueAutopilotEvent(store.AutopilotRecord{Reason: a.Reason, Shape: autopilot.ShapeLabel(a.Workload), CommandID: pending.Command.CommandID, At: pending.SentAt,
 		ProviderID: a.Node.ID, Phase: "reserved", Load: a.Load, Unload: a.Unload,
-		Before: autopilotResidentIDs(a.Node.State), After: []string{}, Benefit: a.Benefit})
+		Before: autopilot.ResidentIDs(a.Node.State), After: []string{}, Benefit: a.Benefit})
 	return r.flushAutopilotEvents()
 }

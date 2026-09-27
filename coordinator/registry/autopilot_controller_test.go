@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/eigeninference/d-inference/coordinator/autopilot"
 	"github.com/eigeninference/d-inference/coordinator/protocol"
 	"github.com/eigeninference/d-inference/coordinator/store"
 )
@@ -27,7 +28,7 @@ func newAutopilotControllerTest(t *testing.T, observe bool) (*Registry, *modelAu
 	warmCfg := testWarmPoolConfig()
 	warmCfg.MinWarmByModel = map[string]int{autopilotTestTarget: 1}
 	reg.ConfigureWarmPool(warmCfg)
-	cfg := DefaultAutopilotConfig()
+	cfg := autopilot.DefaultConfig()
 	cfg.Enabled, cfg.ObserveOnly = true, observe
 	if err := reg.ConfigureAutopilot(cfg); err != nil {
 		t.Fatal(err)
@@ -185,7 +186,7 @@ func TestAutopilotControllerSequentialActionsCannotSpendSameDonorFloor(t *testin
 	autopilotControllerProvider(t, reg, "first", now, autopilotTestDonor)
 	autopilotControllerProvider(t, reg, "second", now, autopilotTestDonor)
 	for range 1000 {
-		c.demand.record(AutopilotDemandSample{Model: autopilotTestTarget, ReceivedAt: now.Add(-time.Minute), PromptTokens: 32, RequestedMaxTokens: 64}, now, c.config.DemandWindow)
+		c.demand.Record(autopilot.DemandSample{Model: autopilotTestTarget, ReceivedAt: now.Add(-time.Minute), PromptTokens: 32, RequestedMaxTokens: 64}, now, c.config.DemandWindow)
 	}
 	var sent int
 	reg.autopilotSender = func(string, protocol.ModelAutopilotMessage) error { sent++; return nil }
@@ -311,7 +312,7 @@ func TestAutopilotControllerConcurrentReservationsHonorBudgetWithObservedLegacyL
 		autopilotControllerProvider(t, reg, id, now)
 	}
 	for range 1000 {
-		c.demand.record(AutopilotDemandSample{Model: autopilotTestTarget, ReceivedAt: now.Add(-time.Minute), PromptTokens: 32, RequestedMaxTokens: 64}, now, c.config.DemandWindow)
+		c.demand.Record(autopilot.DemandSample{Model: autopilotTestTarget, ReceivedAt: now.Add(-time.Minute), PromptTokens: 32, RequestedMaxTokens: 64}, now, c.config.DemandWindow)
 	}
 	key := modelLoadKey{ProviderID: "legacy", ModelID: autopilotTestTarget}
 	reg.pendingModelLoads[key], reg.pendingModelLoadStarted[key] = now.Add(time.Minute), now
@@ -319,7 +320,7 @@ func TestAutopilotControllerConcurrentReservationsHonorBudgetWithObservedLegacyL
 	var actions []autopilotAction
 	for _, node := range f.Nodes {
 		one := f
-		one.Nodes = append([]autopilotNode(nil), f.Nodes...)
+		one.Nodes = append([]autopilot.Node(nil), f.Nodes...)
 		for i := range one.Nodes {
 			one.Nodes[i].Idle = one.Nodes[i].ID == node.ID
 		}

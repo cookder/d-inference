@@ -1,4 +1,4 @@
-package registry
+package autopilot
 
 import (
 	"math"
@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-func autopilotVictims(n autopilotNode, model string, cfg AutopilotConfig) ([]string, bool) {
+func autopilotVictims(n Node, model string, cfg Config) ([]string, bool) {
 	state := n.State
 	if state == nil || state.FreeForLoadNoEvictGB == nil || state.MaxModelSlots < 1 {
 		return nil, false
@@ -15,7 +15,7 @@ func autopilotVictims(n autopilotNode, model string, cfg AutopilotConfig) ([]str
 	free := *state.FreeForLoadNoEvictGB
 	slots := state.MaxModelSlots - len(state.ResidentModels)
 	need := n.Fits[model].WeightsGiB
-	if !finiteAutopilotNonnegative(free) || !finiteAutopilotNonnegative(need) || need <= 0 {
+	if !finiteNonnegative(free) || !finiteNonnegative(need) || need <= 0 {
 		return nil, false
 	}
 	if free >= need && slots > 0 {
@@ -51,7 +51,7 @@ func autopilotVictims(n autopilotNode, model string, cfg AutopilotConfig) ([]str
 		victims = append(victims, id)
 		slots++
 		// Only actual provider-authoritative reclaim credit, NEVER scanner padding.
-		if m.ResidentGB != nil && finiteAutopilotNonnegative(*m.ResidentGB) {
+		if m.ResidentGB != nil && finiteNonnegative(*m.ResidentGB) {
 			free += *m.ResidentGB
 		}
 		if free >= need && slots > 0 {
@@ -61,13 +61,13 @@ func autopilotVictims(n autopilotNode, model string, cfg AutopilotConfig) ([]str
 	return nil, false
 }
 
-func planAutopilotAction(f autopilotFleet, cfg AutopilotConfig, now time.Time) *autopilotAction {
-	c := autopilotCoverage(f)
+func Plan(f Fleet, cfg Config, now time.Time) *Action {
+	c := Coverage(f)
 	reference := c.Reference
-	var best *autopilotAction
+	var best *Action
 	hasPlacementNeed := false
 	for key, need := range c.Need {
-		if need > c.Ready[key]+c.Future[key] || c.Warm[autopilotModel(key)] < autopilotFloor(f, autopilotModel(key)) {
+		if need > c.Ready[key]+c.Future[key] || c.Warm[ModelID(key)] < floor(f, ModelID(key)) {
 			hasPlacementNeed = true
 			break
 		}
@@ -83,13 +83,13 @@ func planAutopilotAction(f autopilotFleet, cfg AutopilotConfig, now time.Time) *
 		}
 		for _, m := range models {
 			fit, eligible := n.Fits[m]
-			if !eligible || !fit.MeetsDeadline || fit.Rate <= 0 || slices.Contains(n.Residents, autopilotModel(m)) {
+			if !eligible || !fit.MeetsDeadline || fit.Rate <= 0 || slices.Contains(n.Residents, ModelID(m)) {
 				continue
 			}
-			floorShort := c.Warm[autopilotModel(m)] < autopilotFloor(f, autopilotModel(m)) && c.Future[m] == 0
+			floorShort := c.Warm[ModelID(m)] < floor(f, ModelID(m)) && c.Future[m] == 0
 			bootstrap := !hasPlacementNeed && len(n.Residents) == 0 && n.State != nil && n.State.LastCommandID == "" && c.Future[m] == 0
 			floorShort = floorShort || bootstrap
-			if !floorShort && autopilotShapeLabel(m) != "" && !f.Demand[m].Sustained {
+			if !floorShort && ShapeLabel(m) != "" && !f.Demand[m].Sustained {
 				continue
 			}
 			gap := c.Need[m] - c.Ready[m] - c.Future[m]
@@ -100,13 +100,13 @@ func planAutopilotAction(f autopilotFleet, cfg AutopilotConfig, now time.Time) *
 			if !ok {
 				continue
 			}
-			futureResidents := []string{autopilotModel(m)}
+			futureResidents := []string{ModelID(m)}
 			for _, old := range n.Residents {
 				if !slices.Contains(victims, old) {
 					futureResidents = append(futureResidents, old)
 				}
 			}
-			future := autopilotNodeContribution(n, futureResidents, c.Workload)
+			future := NodeContribution(n, futureResidents, c.Workload)
 			useful := math.Min(math.Max(0, gap), future[m])
 			horizon := math.Min(300, cfg.MinDwell.Seconds())
 			benefit := useful * reference[m] * math.Max(0, horizon-fit.LoadSeconds)
@@ -142,7 +142,7 @@ func planAutopilotAction(f autopilotFleet, cfg AutopilotConfig, now time.Time) *
 				} else if floorShort {
 					reason = "protected_floor"
 				}
-				best = &autopilotAction{Workload: m, Reason: reason, Node: n, Load: autopilotModel(m), Unload: victims, Benefit: benefit, Future: future}
+				best = &Action{Workload: m, Reason: reason, Node: n, Load: ModelID(m), Unload: victims, Benefit: benefit, Future: future}
 			}
 		}
 	}
@@ -150,12 +150,12 @@ func planAutopilotAction(f autopilotFleet, cfg AutopilotConfig, now time.Time) *
 		return best
 	}
 	for _, n := range f.Nodes {
-		if !n.Managed || !n.Idle || n.Pending || n.State == nil || !finiteAutopilotNonnegative(n.MemoryPressure) || !autopilotDonorsProtected(f, c, n) {
+		if !n.Managed || !n.Idle || n.Pending || n.State == nil || !finiteNonnegative(n.MemoryPressure) || !autopilotDonorsProtected(f, c, n) {
 			continue
 		}
 		var victims []string
 		for _, m := range n.State.ResidentModels {
-			d := autopilotDemandForModel(f.Demand, m.ModelID)
+			d := demandForModel(f.Demand, m.ModelID)
 			if d.Rate > 0 || (!d.LastDemand.IsZero() && now.Sub(d.LastDemand) < cfg.IdleUnloadAfter) || slices.Contains(n.State.PinnedModels, m.ModelID) || m.ResidentSeconds < math.Max(cfg.MinDwell.Seconds(), float64(n.State.MinDwellSeconds)) || m.IdleSeconds < math.Max(cfg.IdleUnloadAfter.Seconds(), float64(n.State.MinIdleSeconds)) {
 				continue
 			}
@@ -168,7 +168,7 @@ func planAutopilotAction(f autopilotFleet, cfg AutopilotConfig, now time.Time) *
 					retained = append(retained, m)
 				}
 			}
-			return &autopilotAction{Reason: "idle_surplus", Node: n, Unload: victims, Future: autopilotNodeContribution(n, retained, c.Workload)}
+			return &Action{Reason: "idle_surplus", Node: n, Unload: victims, Future: NodeContribution(n, retained, c.Workload)}
 		}
 	}
 	return nil
@@ -177,13 +177,13 @@ func planAutopilotAction(f autopilotFleet, cfg AutopilotConfig, now time.Time) *
 // One fixed valuation per model prevents slow recipients from being rewarded
 // for taking longer to serve an identical request. Candidate-specific speed
 // enters Rate, never the value assigned to a recovered request.
-func autopilotReferenceService(f autopilotFleet, model string) float64 {
-	if s := f.Demand[model].ServiceSeconds; finiteAutopilotNonnegative(s) && s > 0 {
+func autopilotReferenceService(f Fleet, model string) float64 {
+	if s := f.Demand[model].ServiceSeconds; finiteNonnegative(s) && s > 0 {
 		return s
 	}
 	var values []float64
 	for _, n := range f.Nodes {
-		if fit, ok := n.Fits[model]; ok && fit.MeetsDeadline && finiteAutopilotNonnegative(fit.ServiceSeconds) && fit.ServiceSeconds > 0 {
+		if fit, ok := n.Fits[model]; ok && fit.MeetsDeadline && finiteNonnegative(fit.ServiceSeconds) && fit.ServiceSeconds > 0 {
 			values = append(values, fit.ServiceSeconds)
 		}
 	}

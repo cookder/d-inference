@@ -12,8 +12,8 @@ deactivated soon; upgrade to macOS 27 to avoid the legacy enrollment step.
 
 - A Mac that meets [hardware requirements](./hardware-requirements.md#minimum-requirements).
   `darkbloom start` refuses machines below the RAM floor or without a
-  Metal GPU (`provider-swift/Sources/darkbloom/StartCommand+Preflight.swift`,
-  `Start.runPreflightChecks`; `provider-swift/Sources/darkbloom/StartCommand.swift`,
+  Metal GPU (`provider-swift/Sources/darkbloom/Start/StartCommand+Preflight.swift`,
+  `Start.runPreflightChecks`; `provider-swift/Sources/darkbloom/Start/StartCommand.swift`,
   `Start.prepareServeRuntime`).
 - Outbound HTTPS (443) to `api.darkbloom.dev`; the provider is an outbound-only
   WebSocket client to `wss://api.darkbloom.dev/ws/provider`
@@ -45,7 +45,7 @@ listed in [troubleshooting](./troubleshooting.md#doctor-checks).
 
 ### 3. Download a model
 
-`darkbloom start` (`provider-swift/Sources/darkbloom/StartCommand.swift`) runs
+`darkbloom start` (`provider-swift/Sources/darkbloom/Start/StartCommand.swift`) runs
 preflight checks (SIP, debugger, GPU, memory), offers to link your account if
 you are not logged in, shows an interactive model picker, asks whether models
 should stay loaded while idle (`Always ready`) or be unloaded after 60 minutes
@@ -81,8 +81,8 @@ to your account. `darkbloom start` offers this step inline if you skip it.
 darkbloom start
 ```
 
-`Start` (`provider-swift/Sources/darkbloom/StartCommand.swift`,
-`provider-swift/Sources/darkbloom/StartCommand+Daemon.swift`) prints the
+`Start` (`provider-swift/Sources/darkbloom/Start/StartCommand.swift`,
+`provider-swift/Sources/darkbloom/Start/StartCommand+Daemon.swift`) prints the
 Terms-of-Service notice (starting is acceptance), runs preflight, offers inline
 login, shows the model picker unless `--model <id>` (repeatable) or `--all` is
 given, then writes `~/Library/LaunchAgents/io.darkbloom.provider.plist`
@@ -169,7 +169,7 @@ private_only = false         # true = serve only your own self-route traffic
 - Provider TOML is authoritative for both controls. Changes take effect at
   process restart; after setting either key to `false`, run `darkbloom restart`
   to activate the rollback. The start path projects config before Metal access
-  (`provider-swift/Sources/darkbloom/StartCommand.swift:84-91` and
+  (`provider-swift/Sources/darkbloom/Start/StartCommand.swift:84-91` and
   `provider-swift/Sources/darkbloom/ServeRuntimePreparer.swift:24-35`), while
   `darkbloom beta` durably locks, reloads, and saves the selected value before
   printing the restart boundary

@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/eigeninference/d-inference/coordinator/autopilot"
 	"github.com/eigeninference/d-inference/coordinator/registry"
 )
 
@@ -16,7 +17,7 @@ type autopilotDemandKey struct{}
 // exit consumes it. There is no request-ID set, content, or identity retention.
 type autopilotDemandRequest struct {
 	mu       sync.Mutex
-	sample   registry.AutopilotDemandSample
+	sample   autopilot.DemandSample
 	profile  *registry.RequestProfile
 	reason   string
 	armed    bool
@@ -35,7 +36,7 @@ func (s *Server) beginAutopilotDemand(r *http.Request, receivedAt time.Time) (*h
 	if s == nil || s.registry == nil || !inferenceOutcomeEndpoint(r) || !s.registry.AutopilotEnabled() {
 		return r, nil
 	}
-	d := &autopilotDemandRequest{sample: registry.AutopilotDemandSample{ReceivedAt: receivedAt}}
+	d := &autopilotDemandRequest{sample: autopilot.DemandSample{ReceivedAt: receivedAt}}
 	return r.WithContext(context.WithValue(r.Context(), autopilotDemandKey{}, d)), d
 }
 
@@ -138,18 +139,18 @@ func autopilotTerminalReason(reason string, status int) string {
 // success counter. Valid requests that fail or depart still consumed demand;
 // intrinsic request limits and coordinator saturation are explicitly labeled so
 // the controller must not mistake them for a removable model-placement deficit.
-func (d *autopilotDemandRequest) finish(status int, clientDeparted bool) (registry.AutopilotDemandSample, bool) {
+func (d *autopilotDemandRequest) finish(status int, clientDeparted bool) (autopilot.DemandSample, bool) {
 	if d == nil {
-		return registry.AutopilotDemandSample{}, false
+		return autopilot.DemandSample{}, false
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.finished {
-		return registry.AutopilotDemandSample{}, false
+		return autopilot.DemandSample{}, false
 	}
 	d.finished = true
 	if !d.armed || d.sample.Model == "" || (status >= 400 && status < 500 && status != http.StatusTooManyRequests && status != 499) {
-		return registry.AutopilotDemandSample{}, false
+		return autopilot.DemandSample{}, false
 	}
 	sample := d.sample
 	sample.Reason = d.reason
@@ -159,7 +160,7 @@ func (d *autopilotDemandRequest) finish(status int, clientDeparted bool) (regist
 	// Unknown/account 429s are not actionable arrival pressure. Recognized
 	// intrinsic/coordinator rejections remain separately diagnosable.
 	if sample.Reason == "other_rate_limit" {
-		return registry.AutopilotDemandSample{}, false
+		return autopilot.DemandSample{}, false
 	}
 	if clientDeparted || status == 499 {
 		sample.Reason = "client_departure"
@@ -178,7 +179,7 @@ func (d *autopilotDemandRequest) finish(status int, clientDeparted bool) (regist
 // provider terminal plus completed consumer output supplies work/service data.
 // Service time includes provider waiting and inference, but excludes coordinator
 // queue/retry time and cold loading (which the placement controller costs apart).
-func observeAutopilotCompletion(sample *registry.AutopilotDemandSample, rp *registry.RequestProfile) {
+func observeAutopilotCompletion(sample *autopilot.DemandSample, rp *registry.RequestProfile) {
 	if rp == nil || rp.ClientWriteErr.Load() || rp.ClientGoneUS.Load() > 0 || rp.DoneFlushedUS.Load() <= 0 {
 		return
 	}

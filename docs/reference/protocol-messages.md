@@ -1,6 +1,6 @@
 # Provider ↔ coordinator protocol messages
 
-> Last updated: 2026-09-26 · commit `f99e56eb0`
+> Last updated: 2026-09-27 · commit `a2ec0da03`
 
 Every JSON frame on the provider WebSocket (`GET /ws/provider`), with the Go
 type, the Swift type, and the presence rule for each field. Go is the canon
@@ -543,7 +543,7 @@ never a key carried in this message.
 
 Go `ModelAutopilotStatusMessage` (`coordinator/protocol/model_autopilot.go`) ·
 Swift `ModelAutopilotStatus`
-(`provider-swift/Sources/ProviderCore/Protocol/ModelAutopilot.swift`).
+(`provider-swift/Sources/ProviderCore/Protocol/Autopilot/ModelAutopilot.swift`).
 
 | JSON key | Go / Swift | Presence | Meaning |
 |---|---|---|---|
@@ -809,7 +809,7 @@ accepts for that name.
 ### `model_autopilot`
 
 Go `ModelAutopilotMessage` (`coordinator/protocol/model_autopilot.go`) · Swift
-`ModelAutopilotCommand` (`provider-swift/Sources/ProviderCore/Protocol/ModelAutopilot.swift`).
+`ModelAutopilotCommand` (`provider-swift/Sources/ProviderCore/Protocol/Autopilot/ModelAutopilot.swift`).
 Sent only for explicit, compatible provider consent after whole-device reservation.
 
 | JSON key | Go / Swift | Presence | Meaning |
@@ -970,7 +970,7 @@ backend-capacity heartbeat. See [autopilot architecture](../architecture/model-a
 | Layer | Files |
 |---|---|
 | Go shape and envelope | `coordinator/protocol/messages_register_heartbeat_test.go`, `messages_backend_capacity_test.go`, `messages_inference_test.go`, `messages_terminal_cause_test.go`, `messages_attestation_test.go`, `messages_model_lifecycle_test.go`, `messages_envelope_test.go`, `prefix_cache_v2_test.go`, `prefix_cache_telemetry_test.go`, `capacity_test.go`, `inference_failure_test.go`, `tool_constraints_test.go`, `type_scan_test.go` |
-| Autopilot command/state | `coordinator/protocol/model_autopilot_test.go`; `provider-swift/Tests/ProviderCoreTests/ModelAutopilotTests.swift` |
+| Autopilot command/state | `coordinator/protocol/model_autopilot_test.go`; `provider-swift/Tests/ProviderCoreTests/Autopilot/ModelAutopilotTests.swift` |
 | Go ↔ Swift key pinning | `coordinator/api/provider_wire_test.go`; `provider-swift/Tests/ProviderCoreTests/Protocol/ProtocolTests.swift`, `CapacityQuoteProtocolTests.swift` |
 | `profile` fixture | `coordinator/protocol/testdata/profiler_wire_fixture.json` — written by Go, loaded by Swift |
 
@@ -986,7 +986,7 @@ backend-capacity heartbeat. See [autopilot architecture](../architecture/model-a
 ## Autopilot activation and diagnostic fields
 
 Go: `coordinator/protocol/model_autopilot.go` (`ModelAutopilotControl`, `ModelAutopilotState`).
-Swift: `provider-swift/Sources/ProviderCore/Protocol/ModelAutopilot.swift`.
+Swift: `provider-swift/Sources/ProviderCore/Protocol/Autopilot/ModelAutopilot.swift`.
 
 `model_autopilot_control` is coordinator → provider and contains `session_id`,
 `revision`, `enabled`, and `expires_at_ms`. It is sent only to protocol-2 explicit

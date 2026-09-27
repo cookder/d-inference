@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/eigeninference/d-inference/coordinator/autopilot"
 	"github.com/eigeninference/d-inference/coordinator/env"
 )
 
@@ -15,7 +16,7 @@ import (
 type Config struct {
 	MinTrustLevel string
 	WarmPool      WarmPoolConfig
-	Autopilot     AutopilotConfig
+	Autopilot     autopilot.Config
 	CacheRouting  CacheRoutingConfig
 	QualityCap    QualityCapConfig
 }

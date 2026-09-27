@@ -6,6 +6,8 @@ import (
 	"sort"
 	"testing"
 	"time"
+
+	"github.com/eigeninference/d-inference/coordinator/autopilot"
 )
 
 // These benchmarks report operation wall time without contention. Reserve's
@@ -29,7 +31,7 @@ func BenchmarkAutopilotControllerFleet1000(b *testing.B) {
 			warm := testWarmPoolConfig()
 			warm.MinWarmByModel = map[string]int{catalog[0].ID: 1}
 			reg.ConfigureWarmPool(warm)
-			cfg := DefaultAutopilotConfig()
+			cfg := autopilot.DefaultConfig()
 			cfg.Enabled, cfg.ObserveOnly = true, false
 			if err := reg.ConfigureAutopilot(cfg); err != nil {
 				b.Fatal(err)

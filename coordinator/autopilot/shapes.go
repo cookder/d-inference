@@ -1,4 +1,4 @@
-package registry
+package autopilot
 
 import (
 	"fmt"
@@ -8,8 +8,8 @@ import (
 
 // Cohorts are bounded, prompt-free capability and work-size bins. The model
 // remains an exact catalog build; a cohort key is never sent to a provider.
-func autopilotModel(key string) string { model, _, _ := strings.Cut(key, "\x1f"); return model }
-func autopilotShapeKey(s AutopilotDemandSample) string {
+func ModelID(key string) string { model, _, _ := strings.Cut(key, "\x1f"); return model }
+func ShapeKey(s DemandSample) string {
 	flags := 0
 	if s.RequiresVision {
 		flags |= 1
@@ -40,13 +40,13 @@ func autopilotShapeKey(s AutopilotDemandSample) string {
 	return fmt.Sprintf("%s\x1f%d:%d:%d:%d", s.Model, flags, input, output, deadline)
 }
 
-func (d *autopilotDemandTracker) shapeSnapshot(now time.Time, window time.Duration) map[string]autopilotDemandView {
+func (d *DemandTracker) ShapeSnapshot(now time.Time, window time.Duration) map[string]DemandView {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	out := map[string]autopilotDemandView{}
+	out := map[string]DemandView{}
 	for key, tracker := range d.shapes {
-		samples := tracker.snapshot(now, window)
-		if sample, ok := samples[autopilotModel(key)]; ok && sample.Requests > 0 {
+		samples := tracker.Snapshot(now, window)
+		if sample, ok := samples[ModelID(key)]; ok && sample.Requests > 0 {
 			out[key] = sample
 		} else {
 			delete(d.shapes, key)
@@ -55,10 +55,10 @@ func (d *autopilotDemandTracker) shapeSnapshot(now time.Time, window time.Durati
 	return out
 }
 
-func autopilotDemandForModel(demand map[string]autopilotDemandView, model string) autopilotDemandView {
-	var out autopilotDemandView
+func demandForModel(demand map[string]DemandView, model string) DemandView {
+	var out DemandView
 	for key, d := range demand {
-		if autopilotModel(key) != model {
+		if ModelID(key) != model {
 			continue
 		}
 		out.Rate += d.Rate
@@ -71,12 +71,12 @@ func autopilotDemandForModel(demand map[string]autopilotDemandView, model string
 	return out
 }
 
-func autopilotDemandShare(f autopilotFleet, key string) float64 {
-	total := autopilotDemandForModel(f.Demand, autopilotModel(key)).Rate
+func autopilotDemandShare(f Fleet, key string) float64 {
+	total := demandForModel(f.Demand, ModelID(key)).Rate
 	if total <= 0 {
 		return 1
 	}
 	return f.Demand[key].Rate / total
 }
 
-func autopilotShapeLabel(key string) string { _, shape, _ := strings.Cut(key, "\x1f"); return shape }
+func ShapeLabel(key string) string { _, shape, _ := strings.Cut(key, "\x1f"); return shape }

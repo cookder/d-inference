@@ -7,6 +7,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/eigeninference/d-inference/coordinator/autopilot"
 	"github.com/eigeninference/d-inference/coordinator/protocol"
 	"github.com/eigeninference/d-inference/coordinator/store"
 	"github.com/google/uuid"
@@ -15,7 +16,7 @@ import (
 func (r *Registry) reserveAutopilotAction(c *modelAutopilotController, a autopilotAction, now time.Time) (protocol.ModelAutopilotMessage, bool) {
 	// Demand is leaf-locked independently. It may increase after planning, so
 	// re-evaluate donor coverage and benefit using a current observation.
-	demand := c.demand.shapeSnapshot(now, c.config.DemandWindow)
+	demand := c.demand.ShapeSnapshot(now, c.config.DemandWindow)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.autopilot != c || !c.config.Enabled || c.config.ObserveOnly || c.paused.Load() {
@@ -33,14 +34,14 @@ func (r *Registry) reserveAutopilotAction(c *modelAutopilotController, a autopil
 	if active >= c.config.MaxConcurrentOperations {
 		return protocol.ModelAutopilotMessage{}, false
 	}
-	var node *autopilotNode
+	var node *autopilot.Node
 	for i := range f.Nodes {
 		if f.Nodes[i].ID == a.Node.ID {
 			node = &f.Nodes[i]
 			break
 		}
 	}
-	if node == nil || node.Session != a.Node.Session || node.Seq != a.Node.Seq || !node.Managed || !node.Idle || node.Pending || !slices.Equal(autopilotResidentIDs(node.State), autopilotResidentIDs(a.Node.State)) {
+	if node == nil || f.sessions[node.ID] != a.session || node.Seq != a.Node.Seq || !node.Managed || !node.Idle || node.Pending || !slices.Equal(autopilot.ResidentIDs(node.State), autopilot.ResidentIDs(a.Node.State)) {
 		return protocol.ModelAutopilotMessage{}, false
 	}
 	// Restrict replanning to this recipient, while retaining all other nodes'
@@ -51,11 +52,11 @@ func (r *Registry) reserveAutopilotAction(c *modelAutopilotController, a autopil
 		}
 	}
 	fresh := planAutopilotAction(f, c.config, now)
-	if fresh == nil || fresh.Load != a.Load || !slices.Equal(sortedAutopilotStrings(fresh.Unload), sortedAutopilotStrings(a.Unload)) {
+	if fresh == nil || fresh.Load != a.Load || !slices.Equal(autopilot.SortedStrings(fresh.Unload), autopilot.SortedStrings(a.Unload)) {
 		return protocol.ModelAutopilotMessage{}, false
 	}
-	cmd := protocol.ModelAutopilotMessage{Reason: fresh.Reason, Type: protocol.TypeModelAutopilot, SessionID: node.ID, Revision: node.State.Revision, CommandID: uuid.NewString(), LoadModelID: fresh.Load, UnloadModelIDs: append([]string{}, fresh.Unload...), ExpectedResidentModels: autopilotResidentIDs(node.State), ExpiresAtMS: now.Add(c.config.CommandAcceptTimeout).UnixMilli(), LeaseSeconds: int(c.config.MinDwell.Seconds())}
-	p := node.Session
+	cmd := protocol.ModelAutopilotMessage{Reason: fresh.Reason, Type: protocol.TypeModelAutopilot, SessionID: node.ID, Revision: node.State.Revision, CommandID: uuid.NewString(), LoadModelID: fresh.Load, UnloadModelIDs: append([]string{}, fresh.Unload...), ExpectedResidentModels: autopilot.ResidentIDs(node.State), ExpiresAtMS: now.Add(c.config.CommandAcceptTimeout).UnixMilli(), LeaseSeconds: int(c.config.MinDwell.Seconds())}
+	p := f.sessions[node.ID]
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	// Same-snapshot authority is still required at the exact reservation point.
@@ -130,7 +131,7 @@ func (r *Registry) HandleAutopilotStatus(providerID string, session *Provider, m
 	return true
 }
 
-func (r *Registry) markAutopilotWatchdogs(cfg AutopilotConfig, now time.Time) {
+func (r *Registry) markAutopilotWatchdogs(cfg autopilot.Config, now time.Time) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	for _, p := range r.providers {

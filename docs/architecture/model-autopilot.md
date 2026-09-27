@@ -1,6 +1,6 @@
 # Experimental model Autopilot
 
-> Last updated: 2026-09-27 · commit `78725b45b`
+> Last updated: 2026-09-27 · commit `a2ec0da03`
 
 Autopilot manages memory residency for an explicitly selected set of provider
 models. Provider enrollment defaults to off. After selection and verification,
@@ -58,6 +58,9 @@ matching acknowledged lease transfers normal network cold-load/idle ownership.
 Renewals enqueue without waiting on sockets through each connection's bounded
 priority lane. A full queue does not extend that provider's coordinator lease;
 slow connections cannot serialize renewal of healthy peers or the planning tick.
+Each accepted renewal explicitly rebuilds capacity and sends an event heartbeat,
+even when the slot contents are unchanged. With the default ten-second controller
+interval, a longer normal provider heartbeat interval does not delay this report.
 Absent or expired control restores ordinary serving policy. An explicitly paused
 provider retains its resident set and accepts network work only on ready models.
 An accepted operation retains ownership until it finishes even after opt-out,
@@ -154,14 +157,22 @@ residency decision.
 
 ## Code map
 
+`coordinator/autopilot/` is independent policy code: configuration, demand,
+cohorts, placement, donor coverage, summaries and snapshot validation. The registry
+adapter keeps live provider pointers and locks out of that package. It binds each
+returned plan to the exact snapshotted session and revalidates it before mutation.
+Swift runtime, protocol, CLI and test files are grouped by feature; startup has
+its own `Start/` folder.
+
 | Concern | Source |
 |---|---|
-| Startup consent and verification | `provider-swift/Sources/darkbloom/StartCommand+Autopilot.swift` |
-| Selection and download plan | `provider-swift/Sources/darkbloom/StartCommand+Picker.swift`; `provider-swift/Sources/ProviderCore/Models/ModelDownloader+Selection.swift` |
-| Live local controls | `provider-swift/Sources/darkbloom/AutopilotCommand.swift`; `provider-swift/Sources/ProviderCore/Autopilot/ProviderLoop+AutopilotControl.swift` |
-| Protocol | `coordinator/protocol/model_autopilot.go`; `provider-swift/Sources/ProviderCore/Protocol/ModelAutopilot.swift` |
-| Shapes and planning | `coordinator/registry/autopilot_shapes.go`; `coordinator/registry/autopilot_coverage.go`; `coordinator/registry/autopilot_planner.go` |
-| Activation and execution | `coordinator/registry/autopilot_activation.go`; `coordinator/registry/autopilot_commands.go`; `provider-swift/Sources/ProviderCore/ProviderLoop+Autopilot.swift` |
+| Startup consent and verification | `provider-swift/Sources/darkbloom/Start/StartCommand+Autopilot.swift` |
+| Selection and download plan | `provider-swift/Sources/darkbloom/Start/StartCommand+Picker.swift`; `provider-swift/Sources/ProviderCore/Models/ModelDownloader+Selection.swift` |
+| Live local controls | `provider-swift/Sources/darkbloom/Autopilot/AutopilotCommand.swift`; `provider-swift/Sources/ProviderCore/Autopilot/ProviderLoop+AutopilotControl.swift` |
+| Protocol | `coordinator/protocol/model_autopilot.go`; `provider-swift/Sources/ProviderCore/Protocol/Autopilot/ModelAutopilot.swift` |
+| Shapes and planning | `coordinator/autopilot/shapes.go`; `coordinator/autopilot/coverage.go`; `coordinator/autopilot/planner.go` |
+| Demand and policy defaults | `coordinator/autopilot/demand.go`; `coordinator/autopilot/config.go` |
+| Activation and execution | `coordinator/registry/autopilot_activation.go`; `coordinator/registry/autopilot_commands.go`; `provider-swift/Sources/ProviderCore/Autopilot/ProviderLoop+Autopilot.swift` |
 | Durable records | `coordinator/store/postgres_autopilot.go`; `coordinator/registry/autopilot_events.go` |
 | Operator view | `coordinator/api/autopilot_handlers.go` |
 

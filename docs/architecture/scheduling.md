@@ -1,6 +1,6 @@
 # Scheduling: queues, slots, capacity and the warm pool
 
-> Last updated: 2026-09-26 · commit `f99e56eb0`
+> Last updated: 2026-09-27 · commit `a2ec0da03`
 
 Scheduling is the coordinator's model of *how much work the fleet can take
 and where the weights are*: the per-model request queue, the per-slot state
@@ -625,7 +625,7 @@ and grow to the requested limit (`coordinator/store/postgres.go`,
 
 ## Experimental selected-model residency
 
-`coordinator/registry/autopilot_planner.go` (`planAutopilotAction`) adds guarded
+`coordinator/autopilot/planner.go` (`Plan`) adds guarded
 capacity moves for explicitly enrolled providers. The controller splits logical
 work by request shape, prefers positive-benefit additions, protects all donor
 contributions during whole-device transitions, and revalidates at reservation.

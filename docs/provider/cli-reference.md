@@ -196,7 +196,7 @@ and skips startup if that window has closed. A late start serves only for the
 remaining window time. Other provider settings, runtime
 identity/capabilities and local endpoint options remain frozen for the process
 (`ScheduledWindowSelection` in `provider-swift/Sources/darkbloom/ScheduledWindowSelection.swift`;
-`Start.runScheduled` in `provider-swift/Sources/darkbloom/StartCommand+Modes.swift`).
+`Start.runScheduled` in `provider-swift/Sources/darkbloom/Start/StartCommand+Modes.swift`).
 
 
 ### Graceful stop and restart
@@ -453,8 +453,8 @@ is retained.
 ### `darkbloom autopilot`
 
 Experimental memory residency for explicitly selected models; off by default.
-Source: `provider-swift/Sources/darkbloom/AutopilotCommand.swift` (`Autopilot`) and
-`provider-swift/Sources/darkbloom/StartCommand+Autopilot.swift` (`saveAutopilotEnrollment`).
+Source: `provider-swift/Sources/darkbloom/Autopilot/AutopilotCommand.swift` (`Autopilot`) and
+`provider-swift/Sources/darkbloom/Start/StartCommand+Autopilot.swift` (`saveAutopilotEnrollment`).
 Every subcommand accepts `--config`.
 
 | Command / option | Effect |
@@ -1163,7 +1163,7 @@ override `provider.toml` for one process, are in
 | `[backend] mtp_mode` | `auto` | Written by `darkbloom beta enable|disable mtp` |
 | `[backend.model_autopilot] enabled` | `false` | Experimental explicit consent; a nonempty selected set and activation lease are required (`provider-swift/Sources/ProviderCore/Autopilot/ModelAutopilotSettings.swift`) |
 | `[backend.model_autopilot] min_dwell_seconds` | `1800` | Minimum residence before Autopilot replacement; runtime clamps to `60...86400` (`ModelAutopilotSettings.effectiveMinDwellSeconds`) |
-| `[backend.model_autopilot] pinned_models` | `[]` | Models autopilot must retain; configured `[backend] model` is additionally pinned (`provider-swift/Sources/ProviderCore/ProviderLoop+Autopilot.swift`, `autopilotPinnedModels`) |
+| `[backend.model_autopilot] pinned_models` | `[]` | Models autopilot must retain; configured `[backend] model` is additionally pinned (`provider-swift/Sources/ProviderCore/Autopilot/ProviderLoop+Autopilot.swift`, `autopilotPinnedModels`) |
 | `[backend] startup_preload` | `true` | Preload `preload_models` when set, otherwise selected models (previously loaded first on coordinator starts), within slot and memory limits |
 | `[coordinator] url` | `"wss://api.darkbloom.dev/ws/provider"` | |
 | `[coordinator] heartbeat_interval_secs` | `5` | Heartbeat; state file refresh is half of it |
@@ -1264,10 +1264,10 @@ automatic updates with `darkbloom autoupdate disable`.
 | Release endpoint | `GET /v1/releases/latest?platform=macos-arm64` | `provider-swift/Sources/ProviderCore/Update/SelfUpdater.swift` |
 | Update banner timeout | 2 s | `provider-swift/Sources/ProviderCore/Update/UpdateBanner.swift` |
 | Local chat body cap | `localInferenceMaxUploadBytes = 32 * 1024 * 1024` | `provider-swift/Sources/ProviderCore/Server/LocalChatUploadResponder.swift` |
-| Local bind wait | 5 s | `provider-swift/Sources/darkbloom/StartCommand+Modes.swift` (`waitUntilBound`) |
+| Local bind wait | 5 s | `provider-swift/Sources/darkbloom/Start/StartCommand+Modes.swift` (`waitUntilBound`) |
 | Fan lease / renewal | `leaseDurationSeconds = 15` / `renewalIntervalSeconds = 5` | `provider-swift/Sources/DarkbloomFanProtocol/FanIPC.swift` |
 | Fan policy defaults | trigger `45` °C, release `40` °C, speed `80` %, engage after `3` samples, release after `30`; speed range `60`–`90` | `provider-swift/Sources/DarkbloomFanCore/FanPolicy.swift` |
-| Minimum RAM to serve | `hardware.memoryGb` floor — [`../architecture/hardware-support.md#context`](../architecture/hardware-support.md#context) | `provider-swift/Sources/darkbloom/StartCommand+Preflight.swift` |
+| Minimum RAM to serve | `hardware.memoryGb` floor — [`../architecture/hardware-support.md#context`](../architecture/hardware-support.md#context) | `provider-swift/Sources/darkbloom/Start/StartCommand+Preflight.swift` |
 
 ## Related
 

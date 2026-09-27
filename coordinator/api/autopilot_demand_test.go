@@ -7,11 +7,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/eigeninference/d-inference/coordinator/autopilot"
 	"github.com/eigeninference/d-inference/coordinator/registry"
 )
 
 func autopilotRequestFixture() (*http.Request, *autopilotDemandRequest, inferenceAdmissionParams) {
-	d := &autopilotDemandRequest{sample: registry.AutopilotDemandSample{ReceivedAt: time.Now()}}
+	d := &autopilotDemandRequest{sample: autopilot.DemandSample{ReceivedAt: time.Now()}}
 	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 	r = r.WithContext(context.WithValue(r.Context(), autopilotDemandKey{}, d))
 	return r, d, inferenceAdmissionParams{model: "model-build", estimatedPromptTokens: 27, requestedMaxTokens: 64}
@@ -201,7 +202,7 @@ func TestAutopilotSupplyRefusalsRemainOfferedDemand(t *testing.T) {
 }
 
 func TestAutopilotFirstSupplyRefusalCanRestoreQuietModelCoverage(t *testing.T) {
-	d := &autopilotDemandRequest{armed: true, reason: "no_eligible_provider", sample: registry.AutopilotDemandSample{Model: "cached", PromptTokens: 64, RequestedMaxTokens: 64}}
+	d := &autopilotDemandRequest{armed: true, reason: "no_eligible_provider", sample: autopilot.DemandSample{Model: "cached", PromptTokens: 64, RequestedMaxTokens: 64}}
 	sample, ok := d.finish(429, false)
 	if !ok || !sample.CapacityShed {
 		t.Fatal("a quiet model cannot recover from its first qualified supply refusal")

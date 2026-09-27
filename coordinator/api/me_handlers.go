@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/eigeninference/d-inference/coordinator/attestation"
+	"github.com/eigeninference/d-inference/coordinator/autopilot"
 	"github.com/eigeninference/d-inference/coordinator/protocol"
 	"github.com/eigeninference/d-inference/coordinator/registry"
 	"github.com/eigeninference/d-inference/coordinator/store"
@@ -607,7 +608,7 @@ func buildMyProvider(rec *store.ProviderRecord, live *registry.Provider) myProvi
 			mp.IdleUnloadMins = &v
 		}
 		mp.WarmModels = append([]string{}, live.WarmModels...)
-		mp.ModelAutopilot = registry.CloneAutopilotState(live.ModelAutopilot)
+		mp.ModelAutopilot = autopilot.CloneState(live.ModelAutopilot)
 		mp.CurrentModel = live.CurrentModel
 		// Reputation snapshot.
 		mp.Reputation = myReputation{

@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/eigeninference/d-inference/coordinator/api"
+	"github.com/eigeninference/d-inference/coordinator/autopilot"
 	"github.com/eigeninference/d-inference/coordinator/billing"
 	"github.com/eigeninference/d-inference/coordinator/payments"
 	"github.com/eigeninference/d-inference/coordinator/protocol"
@@ -234,7 +235,7 @@ func (s *Suite) Start(ctx context.Context) (err error) {
 		return err
 	}
 	if s.Config.Autopilot {
-		cfg := registry.DefaultAutopilotConfig()
+		cfg := autopilot.DefaultConfig()
 		cfg.Interval = time.Second
 		s.stopAutopilot = s.Coordinator.Registry.StartAutopilotController(s.Ctx, cfg)
 	}

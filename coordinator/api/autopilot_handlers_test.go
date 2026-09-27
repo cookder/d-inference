@@ -4,13 +4,13 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/eigeninference/d-inference/coordinator/registry"
+	"github.com/eigeninference/d-inference/coordinator/autopilot"
 )
 
 func TestAutopilotAdminEndpointRequiresAuthAndValidPause(t *testing.T) {
 	srv, _ := testServer(t)
 	srv.SetAdminKey("autopilot-test-admin")
-	if err := srv.registry.ConfigureAutopilot(registry.DefaultAutopilotConfig()); err != nil {
+	if err := srv.registry.ConfigureAutopilot(autopilot.DefaultConfig()); err != nil {
 		t.Fatal(err)
 	}
 	path := "/v1/admin/autopilot"

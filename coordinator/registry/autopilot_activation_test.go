@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/eigeninference/d-inference/coordinator/autopilot"
 	"github.com/eigeninference/d-inference/coordinator/protocol"
 )
 
@@ -48,34 +49,6 @@ func TestAutopilotPauseStopsReservationsAndPreservesPending(t *testing.T) {
 	}
 }
 
-func TestAutopilotShapesKeepOrdinaryRequestsIndependent(t *testing.T) {
-	d := autopilotDemandTracker{}
-	now := time.Now()
-	ordinary := AutopilotDemandSample{Model: "mixed", ReceivedAt: now.Add(-time.Second), PromptTokens: 100, RequestedMaxTokens: 128}
-	special := ordinary
-	special.RequiresVision = true
-	special.HasTools = true
-	special.PromptTokens = 32000
-	for range 20 {
-		d.record(ordinary, now, 5*time.Minute)
-	}
-	d.record(special, now, 5*time.Minute)
-	shapes := d.shapeSnapshot(now, 5*time.Minute)
-	if len(shapes) != 2 {
-		t.Fatalf("cohorts=%+v", shapes)
-	}
-	a, b := shapes[autopilotShapeKey(ordinary)], shapes[autopilotShapeKey(special)]
-	if a.RequiresVision || a.HasTools || a.Requests != 20 || !b.RequiresVision || b.Requests != 1 {
-		t.Fatalf("shape requirements leaked: %+v", shapes)
-	}
-	node := autopilotPlannerNode("plain", "mixed")
-	node.Fits = map[string]autopilotModelFit{autopilotShapeKey(ordinary): autopilotPlannerFit(10, 1)}
-	capacity := autopilotNodeContribution(node, node.Residents, shapes)
-	if capacity[autopilotShapeKey(ordinary)] <= 0 || capacity[autopilotShapeKey(special)] != 0 {
-		t.Fatalf("capacity=%+v", capacity)
-	}
-}
-
 func TestAutopilotSnapshotKeepsLoadMeasurementAfterUnload(t *testing.T) {
 	r, c, now := newAutopilotControllerTest(t, false)
 	p := autopilotControllerProvider(t, r, "provider", now)
@@ -83,12 +56,12 @@ func TestAutopilotSnapshotKeepsLoadMeasurementAfterUnload(t *testing.T) {
 	defer p.mu.Unlock()
 	p.Models[0].WeightHash = "verified"
 	p.ModelAutopilot.LoadHistory = []protocol.ModelAutopilotLoadTiming{{ModelID: autopilotTestTarget, WeightHash: "verified", LoadMS: 2700, MeasuredAtMS: now.Add(-time.Minute).UnixMilli()}}
-	fit := r.autopilotModelFitLocked(p, autopilotTestTarget, autopilotDemandView{}, c.config)
+	fit := r.autopilotModelFitLocked(p, autopilotTestTarget, autopilot.DemandView{}, c.config)
 	if fit.LoadSeconds != 2.7 {
 		t.Fatalf("load history not used: %+v", fit)
 	}
 	p.ModelAutopilot.LoadHistory[0].WeightHash = "other-build"
-	fit = r.autopilotModelFitLocked(p, autopilotTestTarget, autopilotDemandView{}, c.config)
+	fit = r.autopilotModelFitLocked(p, autopilotTestTarget, autopilot.DemandView{}, c.config)
 	if fit.LoadSeconds != c.config.LoadTimePrior.Seconds() {
 		t.Fatal("measurement from different bytes reused")
 	}
@@ -101,7 +74,7 @@ func TestAutopilotPreservesConfiguredFloorsWhenWarmPoolDisabled(t *testing.T) {
 	cfg.MinWarmByModel = map[string]int{"protected": 2}
 	stop := r.StartWarmPoolController(context.Background(), cfg)
 	defer stop()
-	if err := r.ConfigureAutopilot(DefaultAutopilotConfig()); err != nil {
+	if err := r.ConfigureAutopilot(autopilot.DefaultConfig()); err != nil {
 		t.Fatal(err)
 	}
 	f := r.autopilotFleetSnapshot(r.autopilot, time.Now())
@@ -118,7 +91,7 @@ func TestAutopilotUsesResolvedAccountDeadlineWithoutAccountIdentity(t *testing.T
 	p := autopilotControllerProvider(t, r, "provider", now)
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	d := autopilotDemandView{Requests: 10, PromptTokens: 1024, TailPromptTokens: 1024, RequestedMaxTokens: 64, DeadlineKnown: true, DeadlineSeconds: .001}
+	d := autopilot.DemandView{Requests: 10, PromptTokens: 1024, TailPromptTokens: 1024, RequestedMaxTokens: 64, DeadlineKnown: true, DeadlineSeconds: .001}
 	if r.autopilotModelFitLocked(p, autopilotTestTarget, d, c.config).MeetsDeadline {
 		t.Fatal("tight resolved SLA ignored")
 	}
@@ -126,23 +99,23 @@ func TestAutopilotUsesResolvedAccountDeadlineWithoutAccountIdentity(t *testing.T
 	if !r.autopilotModelFitLocked(p, autopilotTestTarget, d, c.config).MeetsDeadline {
 		t.Fatal("deadline invented for exempt requests")
 	}
-	sample := AutopilotDemandSample{Model: "model", PromptTokens: 100, RequestedMaxTokens: 64, DeadlineKnown: true}
-	exempt := autopilotShapeKey(sample)
+	sample := autopilot.DemandSample{Model: "model", PromptTokens: 100, RequestedMaxTokens: 64, DeadlineKnown: true}
+	exempt := autopilot.ShapeKey(sample)
 	sample.FirstContentDeadline = 5 * time.Second
-	if exempt == autopilotShapeKey(sample) {
+	if exempt == autopilot.ShapeKey(sample) {
 		t.Fatal("SLA and exempt requests share a cohort")
 	}
-	tracker := autopilotDemandTracker{}
+	tracker := autopilot.DemandTracker{}
 	sample.ReceivedAt = now.Add(-time.Second)
-	tracker.record(sample, now, 5*time.Minute)
+	tracker.Record(sample, now, 5*time.Minute)
 	sample.FirstContentDeadline = 0
-	tracker.record(sample, now, 5*time.Minute)
-	views := tracker.shapeSnapshot(now, 5*time.Minute)
+	tracker.Record(sample, now, 5*time.Minute)
+	views := tracker.ShapeSnapshot(now, 5*time.Minute)
 	if !views[exempt].DeadlineKnown || views[exempt].DeadlineSeconds != 0 {
 		t.Fatal("exempt deadline lost during aggregation")
 	}
 	sample.FirstContentDeadline = 5 * time.Second
-	if views[autopilotShapeKey(sample)].DeadlineSeconds != 5 {
+	if views[autopilot.ShapeKey(sample)].DeadlineSeconds != 5 {
 		t.Fatal("SLA budget lost during aggregation")
 	}
 }

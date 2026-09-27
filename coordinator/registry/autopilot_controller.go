@@ -6,11 +6,12 @@ import (
 	"slices"
 	"time"
 
+	"github.com/eigeninference/d-inference/coordinator/autopilot"
 	"github.com/eigeninference/d-inference/coordinator/store"
 	"github.com/google/uuid"
 )
 
-func (r *Registry) ConfigureAutopilot(cfg AutopilotConfig) error {
+func (r *Registry) ConfigureAutopilot(cfg autopilot.Config) error {
 	if err := cfg.Check(); err != nil {
 		return err
 	}
@@ -28,7 +29,7 @@ func (r *Registry) ConfigureAutopilot(cfg AutopilotConfig) error {
 	return nil
 }
 
-func (r *Registry) StartAutopilotController(ctx context.Context, cfg AutopilotConfig) func() {
+func (r *Registry) StartAutopilotController(ctx context.Context, cfg autopilot.Config) func() {
 	if err := r.ConfigureAutopilot(cfg); err != nil {
 		r.logger.Error("invalid autopilot configuration", "error", err)
 		return func() {}
@@ -68,27 +69,27 @@ func (r *Registry) StartAutopilotController(ctx context.Context, cfg AutopilotCo
 	}
 }
 
-func (r *Registry) TriggerAutopilot() AutopilotSummary {
+func (r *Registry) TriggerAutopilot() autopilot.Summary {
 	r.mu.RLock()
 	c := r.autopilot
 	r.mu.RUnlock()
 	if c == nil || !c.config.Enabled {
-		return AutopilotSummary{}
+		return autopilot.Summary{}
 	}
 	return c.tick(time.Now())
 }
 
-func (r *Registry) AutopilotSnapshot() AutopilotSummary {
+func (r *Registry) AutopilotSnapshot() autopilot.Summary {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	if r.autopilot == nil {
-		return AutopilotSummary{}
+		return autopilot.Summary{}
 	}
 	s := r.autopilot.lastSummary
 	s.Paused = r.autopilot.paused.Load()
 	s.Enabled = r.autopilot.config.Enabled
 	s.Running = r.autopilot.running
-	s.Models = append([]AutopilotModelSummary(nil), s.Models...)
+	s.Models = append([]autopilot.ModelSummary(nil), s.Models...)
 	s.Excluded = map[string]int{}
 	for k, v := range r.autopilot.lastSummary.Excluded {
 		s.Excluded[k] = v
@@ -96,7 +97,7 @@ func (r *Registry) AutopilotSnapshot() AutopilotSummary {
 	return s
 }
 
-func (c *modelAutopilotController) tick(now time.Time) AutopilotSummary {
+func (c *modelAutopilotController) tick(now time.Time) autopilot.Summary {
 	started := time.Now()
 	c.tickMu.Lock()
 	defer c.tickMu.Unlock()
@@ -120,7 +121,7 @@ func (c *modelAutopilotController) tick(now time.Time) AutopilotSummary {
 		}
 		summary.Proposed++
 		if c.config.ObserveOnly {
-			c.registry.queueAutopilotEvent(store.AutopilotRecord{Reason: action.Reason, Shape: autopilotShapeLabel(action.Workload), CommandID: uuid.NewString(), At: now, ProviderID: action.Node.ID, Phase: "proposed", Load: action.Load, Unload: action.Unload, Before: autopilotResidentIDs(action.Node.State), Benefit: action.Benefit})
+			c.registry.queueAutopilotEvent(store.AutopilotRecord{Reason: action.Reason, Shape: autopilot.ShapeLabel(action.Workload), CommandID: uuid.NewString(), At: now, ProviderID: action.Node.ID, Phase: "proposed", Load: action.Load, Unload: action.Unload, Before: autopilot.ResidentIDs(action.Node.State), Benefit: action.Benefit})
 			// Hypothetical state stays in this copy. It never reaches routing,
 			// pending maps, donor protection of another controller or telemetry of
 			// actual capacity. Simulate the debit for this pass only.
@@ -145,23 +146,23 @@ func (c *modelAutopilotController) tick(now time.Time) AutopilotSummary {
 		if !ok { // State moved since the snapshot. Try again on the next bounded tick.
 			break
 		}
-		action.Node.Session.mu.Lock()
-		pending := action.Node.Session.autopilotPending
-		action.Node.Session.mu.Unlock()
+		action.session.mu.Lock()
+		pending := action.session.autopilotPending
+		action.session.mu.Unlock()
 		if pending == nil {
 			break
 		}
 		if !c.registry.recordAutopilotReservation(*action, pending) {
-			action.Node.Session.mu.Lock()
-			if action.Node.Session.autopilotPending == pending {
-				action.Node.Session.autopilotPending = nil
+			action.session.mu.Lock()
+			if action.session.autopilotPending == pending {
+				action.session.autopilotPending = nil
 			}
-			action.Node.Session.mu.Unlock()
+			action.session.mu.Unlock()
 			c.registry.queueAutopilotEvent(store.AutopilotRecord{CommandID: command.CommandID, At: now, ProviderID: action.Node.ID, Phase: "failed", Load: action.Load})
 			break
 		}
 		summary.Issued++
-		c.registry.sendAutopilotCommand(action.Node.Session, command)
+		c.registry.sendAutopilotCommand(action.session, command)
 		f = c.registry.autopilotFleetSnapshot(c, now)
 	}
 	c.registry.mu.Lock()
@@ -171,40 +172,4 @@ func (c *modelAutopilotController) tick(now time.Time) AutopilotSummary {
 		c.registry.logger.Info("model autopilot tick", "duration_ms", float64(time.Since(started).Microseconds())/1000, "observe_only", summary.ObserveOnly, "opted_in", summary.OptedIn, "pending", summary.Pending, "uncertain", summary.Uncertain, "proposed", summary.Proposed, "issued", summary.Issued, "excluded", summary.Excluded, "models", summary.Models)
 	}
 	return summary
-}
-
-func autopilotSummary(f autopilotFleet, cfg AutopilotConfig, now time.Time) AutopilotSummary {
-	s := AutopilotSummary{At: now, ObserveOnly: cfg.ObserveOnly, Excluded: f.Excluded}
-	coverage := autopilotCoverage(f)
-	models := make([]string, 0, len(f.Demand)+len(f.Floors))
-	for m := range f.Demand {
-		models = append(models, m)
-	}
-	for m := range f.Floors {
-		if !slices.Contains(models, m) {
-			models = append(models, m)
-		}
-	}
-	slices.Sort(models)
-	for _, n := range f.Nodes {
-		if n.Managed {
-			s.OptedIn++
-		}
-		if n.Pending {
-			s.Pending++
-			if n.Uncertain {
-				s.Uncertain++
-			}
-		}
-	}
-	for _, m := range models {
-		eligible := 0
-		for _, n := range f.Nodes {
-			if n.Managed && n.Idle && !n.Pending && n.Fits[m].MeetsDeadline {
-				eligible++
-			}
-		}
-		s.Models = append(s.Models, AutopilotModelSummary{Model: autopilotModel(m), Shape: autopilotShapeLabel(m), LogicalRequests: f.Demand[m].Requests, OfferedRPS: f.Demand[m].Rate, CapacityRPS: coverage.Ready[m], PendingRPS: coverage.Future[m], ProtectedFloor: autopilotFloor(f, autopilotModel(m)), WarmProviders: coverage.Warm[autopilotModel(m)], EligibleIdle: eligible, DeficitRPS: max(0, coverage.Need[m]-coverage.Ready[m]-coverage.Future[m])})
-	}
-	return s
 }

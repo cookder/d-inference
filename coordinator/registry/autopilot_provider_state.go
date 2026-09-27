@@ -1,10 +1,9 @@
 package registry
 
 import (
-	"math"
-	"sort"
 	"time"
 
+	"github.com/eigeninference/d-inference/coordinator/autopilot"
 	"github.com/eigeninference/d-inference/coordinator/protocol"
 	"github.com/eigeninference/d-inference/coordinator/store"
 )
@@ -17,111 +16,14 @@ func providerAutopilotTransitionLocked(p *Provider) bool {
 	return p.autopilotPending != nil || (p.ModelAutopilot != nil && p.ModelAutopilot.ActiveCommandID != "")
 }
 
-func cloneAutopilotState(in *protocol.ModelAutopilotState) *protocol.ModelAutopilotState {
-	if in == nil {
-		return nil
-	}
-	// Keep malformed opt-in/control ownership fail-closed without retaining an
-	// unbounded untrusted report. A later valid heartbeat can replace it.
-	if len(in.SelectedModels) > 256 || len(in.Revision) > 64 || len(in.SessionID) > 128 || len(in.LoadHistory) > 64 || len(in.ResidentModels) > 32 || len(in.PinnedModels) > 256 || len(in.ActiveCommandID) > 64 || len(in.LastCommandID) > 64 {
-		return &protocol.ModelAutopilotState{Protocol: in.Protocol, Enabled: in.Enabled, ActiveCommandID: "invalid_report"}
-	}
-	for _, id := range in.SelectedModels {
-		if id == "" || len(id) > 256 {
-			return &protocol.ModelAutopilotState{Enabled: in.Enabled, ActiveCommandID: "invalid_report"}
-		}
-	}
-	for _, timing := range in.LoadHistory {
-		if len(timing.ModelID) > 256 || len(timing.WeightHash) > 128 {
-			return &protocol.ModelAutopilotState{Enabled: in.Enabled, ActiveCommandID: "invalid_report"}
-		}
-	}
-	for _, m := range in.ResidentModels {
-		if len(m.ModelID) > 256 {
-			return &protocol.ModelAutopilotState{Protocol: in.Protocol, Enabled: in.Enabled, ActiveCommandID: "invalid_report"}
-		}
-	}
-	for _, m := range in.PinnedModels {
-		if len(m) > 256 {
-			return &protocol.ModelAutopilotState{Protocol: in.Protocol, Enabled: in.Enabled, ActiveCommandID: "invalid_report"}
-		}
-	}
-	out := *in
-	out.SelectedModels = append([]string(nil), in.SelectedModels...)
-	out.LoadHistory = append([]protocol.ModelAutopilotLoadTiming(nil), in.LoadHistory...)
-	out.PinnedModels = append([]string(nil), in.PinnedModels...)
-	out.ResidentModels = append([]protocol.ModelAutopilotResident(nil), in.ResidentModels...)
-	if in.FreeForLoadNoEvictGB != nil {
-		v := *in.FreeForLoadNoEvictGB
-		out.FreeForLoadNoEvictGB = &v
-	}
-	for i := range out.ResidentModels {
-		if in.ResidentModels[i].ResidentGB != nil {
-			v := *in.ResidentModels[i].ResidentGB
-			out.ResidentModels[i].ResidentGB = &v
-		}
-	}
-	return &out
-}
-
-func validAutopilotState(s *protocol.ModelAutopilotState) bool {
-	if s == nil || s.Protocol != protocol.ModelAutopilotProtocol || !s.Enabled || !s.CachedOnly || s.MaxModelSlots < 1 || s.MaxModelSlots > 32 || s.MinDwellSeconds < 0 || s.MinDwellSeconds > 86400 || len(s.ResidentModels) > 32 || len(s.PinnedModels) > 256 {
-		return false
-	}
-	if len(s.ActiveCommandID) > 64 || len(s.LastCommandID) > 64 {
-		return false
-	}
-	if s.FreeForLoadNoEvictGB == nil || !finiteAutopilotNonnegative(*s.FreeForLoadNoEvictGB) || *s.FreeForLoadNoEvictGB > 4096 {
-		return false
-	}
-	seen := make(map[string]bool)
-	for _, m := range s.ResidentModels {
-		if m.ModelID == "" || len(m.ModelID) > 256 || seen[m.ModelID] || !finiteAutopilotNonnegative(m.ResidentSeconds) || !finiteAutopilotNonnegative(m.IdleSeconds) || !finiteAutopilotNonnegative(m.WeightsGB) {
-			return false
-		}
-		if m.ResidentGB != nil && (!finiteAutopilotNonnegative(*m.ResidentGB) || *m.ResidentGB > 4096) {
-			return false
-		}
-		seen[m.ModelID] = true
-	}
-	return true
-}
-func finiteAutopilotNonnegative(v float64) bool { return v >= 0 && !math.IsNaN(v) && !math.IsInf(v, 0) }
-
-func autopilotResidentIDs(s *protocol.ModelAutopilotState) []string {
-	out := []string{}
-	if s != nil {
-		for _, m := range s.ResidentModels {
-			out = append(out, m.ModelID)
-		}
-	}
-	sort.Strings(out)
-	return out
-}
-
 func autopilotStateMatchesCapacity(p *Provider) bool {
-	if p.BackendCapacity == nil || p.capacitySeq == 0 || !validAutopilotState(p.ModelAutopilot) {
-		return false
-	}
-	residents := make(map[string]bool)
-	for _, m := range p.ModelAutopilot.ResidentModels {
-		residents[m.ModelID] = true
-	}
-	for _, slot := range p.BackendCapacity.Slots {
-		if slot.State == "running" || slot.State == "idle" {
-			if !residents[slot.Model] {
-				return false
-			}
-			delete(residents, slot.Model)
-		}
-	}
-	return len(residents) == 0
+	return autopilot.StateMatchesCapacity(p.ModelAutopilot, p.BackendCapacity, p.capacitySeq)
 }
 
 // Called only after the accepted capacity-sequence gate, under p.mu. Status
 // messages alone never clear reservations or manufacture warm slot capacity.
 func (r *Registry) reconcileAutopilotHeartbeatLocked(p *Provider, state *protocol.ModelAutopilotState, now time.Time) {
-	p.ModelAutopilot = cloneAutopilotState(state)
+	p.ModelAutopilot = autopilot.CloneState(state)
 	pending := p.autopilotPending
 	if pending == nil || state == nil || p.capacitySeq <= pending.CapacitySeq || state.ActiveCommandID != "" || state.LastCommandID != pending.Command.CommandID {
 		return
@@ -133,12 +35,12 @@ func (r *Registry) reconcileAutopilotHeartbeatLocked(p *Provider, state *protoco
 	// must still exactly match the same accepted backend snapshot.
 	enabled := state.Enabled
 	if !enabled {
-		copy := cloneAutopilotState(state)
+		copy := autopilot.CloneState(state)
 		copy.Enabled = true
 		p.ModelAutopilot = copy
 	}
 	matches := autopilotStateMatchesCapacity(p)
-	p.ModelAutopilot = cloneAutopilotState(state)
+	p.ModelAutopilot = autopilot.CloneState(state)
 	if !matches {
 		return
 	}
@@ -149,11 +51,6 @@ func (r *Registry) reconcileAutopilotHeartbeatLocked(p *Provider, state *protoco
 		}
 		p.autopilotBackoffUntil = now.Add(backoff)
 	}
-	r.queueAutopilotEvent(store.AutopilotRecord{CommandID: pending.Command.CommandID, At: now, ProviderID: p.ID, Phase: state.LastCommandStatus, Load: pending.Command.LoadModelID, Unload: pending.Command.UnloadModelIDs, Before: pending.Command.ExpectedResidentModels, After: autopilotResidentIDs(state), ElapsedMS: now.Sub(pending.SentAt).Milliseconds(), LoadMS: max(0, min(state.LastLoadMS, 1800000)), ReleaseMS: max(0, min(state.LastReleaseMS, 1800000))})
+	r.queueAutopilotEvent(store.AutopilotRecord{CommandID: pending.Command.CommandID, At: now, ProviderID: p.ID, Phase: state.LastCommandStatus, Load: pending.Command.LoadModelID, Unload: pending.Command.UnloadModelIDs, Before: pending.Command.ExpectedResidentModels, After: autopilot.ResidentIDs(state), ElapsedMS: now.Sub(pending.SentAt).Milliseconds(), LoadMS: max(0, min(state.LastLoadMS, 1800000)), ReleaseMS: max(0, min(state.LastReleaseMS, 1800000))})
 	p.autopilotPending = nil
-}
-
-// CloneAutopilotState returns a detached diagnostic snapshot for account views.
-func CloneAutopilotState(state *protocol.ModelAutopilotState) *protocol.ModelAutopilotState {
-	return cloneAutopilotState(state)
 }

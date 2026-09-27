@@ -9,6 +9,8 @@ import (
 	"github.com/eigeninference/d-inference/coordinator/protocol"
 	"github.com/eigeninference/d-inference/coordinator/saferun"
 	"nhooyr.io/websocket"
+
+	"github.com/eigeninference/d-inference/coordinator/autopilot"
 )
 
 // Register adds a new provider to the registry, returning its assigned ID.
@@ -81,7 +83,7 @@ func (r *Registry) Register(id string, conn *websocket.Conn, msg *protocol.Regis
 	}
 
 	p := &Provider{
-		ModelAutopilot:              cloneAutopilotState(msg.ModelAutopilot),
+		ModelAutopilot:              autopilot.CloneState(msg.ModelAutopilot),
 		ID:                          id,
 		stateRestorePending:         r.store != nil,
 		Hardware:                    msg.Hardware,
