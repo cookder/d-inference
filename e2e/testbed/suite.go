@@ -54,6 +54,7 @@ func execCommandContext(ctx context.Context, name string, args ...string) *exec.
 
 type Suite struct {
 	providerAttempts []*Provider
+	stopAutopilot    func()
 
 	Ctx    context.Context
 	Logger *slog.Logger
@@ -232,6 +233,11 @@ func (s *Suite) Start(ctx context.Context) (err error) {
 	if err = s.waitForProviderRegistration(3 * time.Minute); err != nil {
 		return err
 	}
+	if s.Config.Autopilot {
+		cfg := registry.DefaultAutopilotConfig()
+		cfg.Interval = time.Second
+		s.stopAutopilot = s.Coordinator.Registry.StartAutopilotController(s.Ctx, cfg)
+	}
 	// Built-backend assertion: when the lane declares an expected KV backend
 	// (DARKBLOOM_TESTBED_EXPECT_KV_BACKEND or SuiteConfig.ExpectKVBackend),
 	// refuse to come up until every provider slot proves the engine it
@@ -244,6 +250,10 @@ func (s *Suite) Stop() { _ = s.StopAndWait() }
 
 func (s *Suite) StopAndWait() error {
 	var result error
+	if s.stopAutopilot != nil {
+		s.stopAutopilot()
+		s.stopAutopilot = nil
+	}
 	seen := make(map[*Provider]bool)
 	for _, providers := range [][]*Provider{s.Providers, s.providerAttempts} {
 		for _, p := range providers {

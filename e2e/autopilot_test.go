@@ -19,12 +19,9 @@ func TestIntegration_AutopilotCachedBootstrapAndPause(t *testing.T) {
 	model := testbed.DefaultTestModelID()
 	s := testbed.NewSuite(testbed.SuiteConfig{Autopilot: true,
 		ModelSpecs: []testbed.ModelSpec{{ModelID: model, NumProviders: 1}}, NumUsers: 1, SeedBalance: 500_000_000})
+	since := time.Now()
 	require.NoError(t, s.Start(context.Background()))
 	t.Cleanup(s.Stop)
-	cfg := registry.DefaultAutopilotConfig()
-	cfg.Interval = time.Second
-	stop := s.Coordinator.Registry.StartAutopilotController(s.Ctx, cfg)
-	t.Cleanup(stop)
 	logProviders := func() {
 		s.Coordinator.Registry.ForEachProviderVerification(func(p *registry.Provider, _ registry.Verification, models registry.PublicProviderModelSnapshot) {
 			t.Logf("autopilot provider diagnostics: status=%s models=%v metrics=%+v autopilot=%+v",
@@ -38,7 +35,6 @@ func TestIntegration_AutopilotCachedBootstrapAndPause(t *testing.T) {
 	})
 	ledger, ok := store.As[store.AutopilotStore](s.PgStore)
 	require.True(t, ok)
-	since := time.Now().Add(-time.Minute)
 	var events []store.AutopilotRecord
 	waitTicks := 0
 	require.Eventually(t, func() bool {

@@ -1,6 +1,6 @@
 # Test
 
-> Last updated: 2026-09-26 · commit `f99e56eb0`
+> Last updated: 2026-09-27 · commit `78725b45b`
 
 How to run the unit tests for each component, the end-to-end suite that boots a
 real coordinator + Swift provider against ephemeral Postgres, and the docs
@@ -2366,6 +2366,11 @@ against a mock WebSocket coordinator while accepted work is held open.
 owner authorization while retaining runtime/security denials.
 
 ## Experimental Autopilot integration
+
+Autopilot testbed suites start their controller before KV-backend verification.
+That verification observes Autopilot-created slots and keeps the same strict
+backend check; it does not send a competing legacy `load_model` to an enrolled
+provider. This also covers CI lanes with `DARKBLOOM_TESTBED_EXPECT_KV_BACKEND` set.
 
 `e2e/autopilot_test.go` (`TestIntegration_AutopilotCachedBootstrapAndPause`)
 starts an isolated PostgreSQL coordinator and a real local Swift provider with

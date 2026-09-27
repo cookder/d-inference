@@ -1,6 +1,6 @@
 # Experimental Autopilot operation and recovery
 
-> Last updated: 2026-09-26 · commit `77852451d`
+> Last updated: 2026-09-27 · commit `78725b45b`
 
 Use this runbook to operate active, explicitly enrolled providers and inspect
 residency outcomes. Provider Autopilot defaults off; setup enables active control
