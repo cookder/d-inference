@@ -78,9 +78,10 @@ func (r *Registry) sendAutopilotCommand(p *Provider, command protocol.ModelAutop
 		var body []byte
 		body, err = json.Marshal(command)
 		if err == nil {
-			ctx, cancel := context.WithTimeout(context.Background(), providerControlWriteTimeout)
-			err = p.WriteTextControl(ctx, body)
-			cancel()
+			// Queue admission is bounded and never waits for a peer socket.
+			// Pending ownership lasts through a matching terminal heartbeat;
+			// enqueue success is not evidence of delivery or completion.
+			err = p.EnqueueText(context.Background(), body)
 		}
 	}
 	if err != nil {

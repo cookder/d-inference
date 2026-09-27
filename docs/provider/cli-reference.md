@@ -1,6 +1,6 @@
 # Provider CLI reference
 
-> Last updated: 2026-09-27 · commit `4ad3034df`
+> Last updated: 2026-09-27 · commit `81e7f1532`
 
 Reference for the `darkbloom` command-line tool: every subcommand and flag, the
 files and identifiers it creates, the `provider.toml` keys it reads with their
@@ -89,9 +89,12 @@ detection fails, no model is selected, or the local server does not bind within
 
 A replacement start completes the picker/preflight and saves the selected IDs
 under `backend.enabled_models` while holding the lifecycle lease, before it
-disables recovery or drains/stops the current provider. A persistence failure
-leaves the current service unchanged. Only then does it drain, stop, and install
-the chosen configuration. Foreground/local starts also require a drained handoff;
+disables recovery or drains/stops the current provider. Failure of this initial
+selection write leaves the current service unchanged. After drain acknowledgement,
+Autopilot consent is saved before stopping the daemon and installing the chosen
+configuration. If this later write fails, a gracefully drained daemon is left
+running and drained, with recovery disabled; correct the configuration and retry
+`start`. No replacement is installed (`Start.completeDaemonReplacement`). Foreground/local starts also require a drained handoff;
 the process-lifetime kernel lock never silently sends SIGKILL after a short grace period.
 On launchd-managed foreground starts (including restart and watchdog recovery),
 an explicitly pinned `enabled_models` takes precedence over old `--model` plist

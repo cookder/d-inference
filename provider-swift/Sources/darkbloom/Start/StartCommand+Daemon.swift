@@ -76,17 +76,17 @@ extension Start {
                 fallbackConfig: config, body: setup)
         })
         defer { replacement.release() }
-        try await ServiceDrain.stopDrainedProvider()
-        try saveAutopilotEnrollment(enabled: enableAutopilot, models: selectedModelIDs,
-            configPath: configOptions.config)
-        try LaunchAgent.installAndStart(
-            coordinatorURL: coordinatorURL,
-            models: selectedModelIDs,
-            configPath: configPath,
-            localEndpoint: LaunchAgent.LocalEndpointOptions(
-                enabled: localEndpoint, port: port, bind: bind, noAuth: noAuth
+        try await Self.completeDaemonReplacement(autopilot: enableAutopilot, models: selectedModelIDs,
+            configPath: configOptions.config) {
+            try LaunchAgent.installAndStart(
+                coordinatorURL: coordinatorURL,
+                models: selectedModelIDs,
+                configPath: configPath,
+                localEndpoint: LaunchAgent.LocalEndpointOptions(
+                    enabled: localEndpoint, port: port, bind: bind, noAuth: noAuth
+                )
             )
-        )
+        }
 
         // Arm the crash-recovery watchdog (relaunches ~5 min after a crash;
         // `stop` disarms, `auto_restart = false` opts out — including

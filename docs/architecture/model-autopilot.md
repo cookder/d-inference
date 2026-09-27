@@ -1,6 +1,6 @@
 # Experimental model Autopilot
 
-> Last updated: 2026-09-27 · commit `cd7abd5a2`
+> Last updated: 2026-09-27 · commit `81e7f1532`
 
 Autopilot manages memory residency for an explicitly selected set of provider
 models. Provider enrollment defaults to off. After selection and verification,
@@ -141,7 +141,10 @@ persisted before dispatch. Ledger failure suspends new operations while pending
 outcomes remain queued for retry. Existing request-outcome records provide the
 completion and first-content evidence for comparisons by model/shape/window.
 A command proven not to have entered the writer queue records a failed terminal
-phase with unchanged residency. A failed retry cannot erase uncertain delivery.
+phase with unchanged residency. A failed retry cannot erase uncertain delivery. Initial commands and retries
+use the bounded priority enqueue path, so stalled sockets cannot block the
+controller tick or delay another provider's control renewal. Enqueue acceptance
+retains pending ownership; only terminal heartbeat reconciliation releases it.
 No causal improvement is inferred from command success alone.
 
 ## Invariants
@@ -156,7 +159,10 @@ No causal improvement is inferred from command success alone.
 
 ## Failure modes
 
-A failed setup preserves the running provider and its prior consent. A lost
+A setup failure before drain publication preserves the running provider and its
+prior consent. After acknowledgement, consent is persisted before stopping the
+daemon. A failed write leaves a gracefully drained daemon alive and drained for
+a corrected `start` retry; it does not install a replacement. A lost
 controller lease restores ordinary policy after any accepted operation finishes.
 Disconnect and expired-control revocation re-arm the saved idle monitor; its
 ticks continue to defer to accepted commands and an explicit provider pause.
