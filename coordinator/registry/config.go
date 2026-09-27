@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/eigeninference/d-inference/coordinator/autopilot"
 	"github.com/eigeninference/d-inference/coordinator/env"
+	"github.com/eigeninference/d-inference/coordinator/registry/autopilot"
 )
 
 // Config holds registry-level configuration.

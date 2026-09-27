@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/eigeninference/d-inference/coordinator/autopilot"
+	"github.com/eigeninference/d-inference/coordinator/registry/autopilot"
 )
 
 func TestAutopilotProjectionPreservesEveryHardRoutingTrait(t *testing.T) {

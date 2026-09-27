@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/eigeninference/d-inference/coordinator/autopilot"
+	"github.com/eigeninference/d-inference/coordinator/registry/autopilot"
 )
 
 func TestAutopilotAdminEndpointRequiresAuthAndValidPause(t *testing.T) {
@@ -18,11 +18,6 @@ func TestAutopilotAdminEndpointRequiresAuthAndValidPause(t *testing.T) {
 		t.Fatalf("unauthenticated=%d", w.Code)
 	}
 	auth := "Bearer autopilot-test-admin"
-	for _, body := range []string{`{}`, `{"paused":"yes"}`, `{"paused":true,"extra":1}`, `{"paused":true} {}`} {
-		if w := doReq(srv, http.MethodPost, path, auth, body); w.Code != http.StatusBadRequest {
-			t.Fatalf("body=%s code=%d", body, w.Code)
-		}
-	}
 	if w := doReq(srv, http.MethodPost, path, auth, `{"paused":true}`); w.Code != http.StatusOK {
 		t.Fatalf("pause=%d %s", w.Code, w.Body.String())
 	}

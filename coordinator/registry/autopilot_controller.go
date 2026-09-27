@@ -6,7 +6,7 @@ import (
 	"slices"
 	"time"
 
-	"github.com/eigeninference/d-inference/coordinator/autopilot"
+	"github.com/eigeninference/d-inference/coordinator/registry/autopilot"
 	"github.com/eigeninference/d-inference/coordinator/store"
 	"github.com/google/uuid"
 )

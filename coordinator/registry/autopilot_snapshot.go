@@ -5,9 +5,9 @@ import (
 	"slices"
 	"time"
 
-	"github.com/eigeninference/d-inference/coordinator/autopilot"
 	"github.com/eigeninference/d-inference/coordinator/modelpolicy"
 	"github.com/eigeninference/d-inference/coordinator/protocol"
+	"github.com/eigeninference/d-inference/coordinator/registry/autopilot"
 )
 
 func (r *Registry) autopilotFleetSnapshot(c *modelAutopilotController, now time.Time) autopilotFleet {

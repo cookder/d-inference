@@ -1,7 +1,7 @@
 package registry
 
 import (
-	"github.com/eigeninference/d-inference/coordinator/autopilot"
+	"github.com/eigeninference/d-inference/coordinator/registry/autopilot"
 	"time"
 )
 

@@ -122,17 +122,6 @@ struct ModelAutopilotTests {
     }
 }
 
-private final class AutopilotRecorder: @unchecked Sendable {
-    private let lock = NSLock()
-    private var messages: [OutboundMessage] = []
-    func append(_ message: OutboundMessage) { lock.withLock { messages.append(message) } }
-    var statuses: [ModelAutopilotStatus] {
-        lock.withLock { messages.compactMap { if case .modelAutopilotStatus(let status) = $0 { return status }; return nil } }
-    }
-    var legacyFailures: Int {
-        lock.withLock { messages.filter { if case .loadModelStatus(_, .failed, _) = $0 { return true }; return false }.count }
-    }
-}
 
 @Suite("ModelAutopilot runtime")
 struct ModelAutopilotRuntimeTests {

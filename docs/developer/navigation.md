@@ -1,6 +1,6 @@
 # Find and organize code
 
-> Last updated: 2026-09-27 · commit `a2ec0da03`
+> Last updated: 2026-09-27 · commit `3030474d7`
 
 Use this guide to find the code behind a behavior and place new files beside
 their owners. Start from the subsystem, then search for the request, command,
@@ -19,7 +19,8 @@ Build and test prerequisites are in [build.md](build.md) and [test.md](test.md).
 |---|---|
 | API request handling, auth, attestation, dispatch | `coordinator/api/`; server construction in `server.go` (`NewServer`) |
 | Provider selection, admission, queueing | `coordinator/registry/`; request eligibility in `request_traits.go` (`providerEligibleForTraitsLocked`) |
-| Autopilot demand, placement and donor coverage | `coordinator/autopilot/`; the registry adapter owns live sessions, reservations and transport |
+| Autopilot admin HTTP contract | `coordinator/api/autopilot/`; parent API adapter supplies authorization and dependencies |
+| Autopilot demand, placement and donor coverage | `coordinator/registry/autopilot/`; the registry adapter owns live sessions, reservations and transport |
 | Billing and durable state | `coordinator/billing/`, `coordinator/payments/`, `coordinator/store/` |
 | Provider inference, downloads, security, local serving | `provider-swift/Sources/ProviderCore/`; entrypoints in `provider-swift/Sources/darkbloom/` |
 | Autopilot runtime and operator controls | `ProviderCore/Autopilot/`, `ProviderCore/Protocol/Autopilot/`, and `darkbloom/Autopilot/` under `provider-swift/Sources/`; startup is in `darkbloom/Start/` |
@@ -55,7 +56,8 @@ separately when you need measurements or the state at a historical commit.
 ### 3. Name and place files by responsibility
 
 Group a feature's independent logic and tests in its own directory. For example,
-`coordinator/autopilot/` owns pure policy and demand tests; it imports no registry
+`coordinator/api/autopilot/` owns its HTTP validation and response tests.
+`coordinator/registry/autopilot/` owns pure policy and demand tests; it imports no registry
 or live-provider types. The registry captures detached values and retains session
 identity beside them before revalidating a plan. Go methods that need registry,
 HTTP-server or store receivers stay in their owning package as integration files.

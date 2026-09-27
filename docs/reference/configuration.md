@@ -1,6 +1,6 @@
 # Configuration reference
 
-> Last updated: 2026-09-27 · commit `4ad3034df`
+> Last updated: 2026-09-27 · commit `3030474d7`
 
 Every environment variable read by the coordinator, the provider CLI
 (`darkbloom`), console-ui and admin-ui: accepted values, the compiled default,
@@ -317,7 +317,7 @@ Throughput anomaly detector:
 
 All coordinator variables below are startup-only and read by
 `coordinator/registry/autopilot_config.go` (`autopilotConfigFromEnv`); defaults and
-validation live in `coordinator/autopilot/config.go` (`DefaultConfig`, `Config.Check`).
+validation live in `coordinator/registry/autopilot/config.go` (`DefaultConfig`, `Config.Check`).
 Provider consent is separate persistent TOML, documented in
 [CLI configuration](../provider/cli-reference.md#providertoml-keys-read-by-the-cli).
 See [architecture](../architecture/model-autopilot.md) and
@@ -333,22 +333,22 @@ See [architecture](../architecture/model-autopilot.md) and
 | `EIGENINFERENCE_AUTOPILOT_LOAD_TIME_PRIOR` | Go duration, `1s...5m` | `30s` | Conservative unmeasured load cost; recent exact-build/weight-hash measurements retained after unloading may replace it (`autopilotConfigFromEnv`; `autopilot_snapshot.go`, `autopilotModelFitLocked`) |
 | `EIGENINFERENCE_AUTOPILOT_MAX_ACTIONS_PER_TICK`, `EIGENINFERENCE_AUTOPILOT_MAX_CONCURRENT_OPERATIONS` | ints, `1...32`, `1...64` | `2`, `4` | Per-tick proposals/commands and managed-operation start budget, accounting for currently observed legacy pending loads; legacy controllers retain separate limits (`autopilotConfigFromEnv`; `autopilot_controller.go`, `tick`) |
 | `EIGENINFERENCE_AUTOPILOT_TARGET_UTILIZATION` | float, `0.1...0.9` | `0.7` | Quality-capacity utilization factor (`autopilotConfigFromEnv`; `autopilot_snapshot.go`, `autopilotModelFitLocked`) |
-| `EIGENINFERENCE_AUTOPILOT_ALLOW_IDLE_UNLOAD` | bool | `true` | Allow standalone surplus unloading after quiet/dwell, pins, floors, whole-device-idle gates (`autopilotConfigFromEnv`; `coordinator/autopilot/planner.go`, `Plan`) |
+| `EIGENINFERENCE_AUTOPILOT_ALLOW_IDLE_UNLOAD` | bool | `true` | Allow standalone surplus unloading after quiet/dwell, pins, floors, whole-device-idle gates (`autopilotConfigFromEnv`; `coordinator/registry/autopilot/planner.go`, `Plan`) |
 
 These implementation defaults have **no environment-variable override** in this
 change; programmatic configuration fields are validated by `autopilot.Config.Check`.
 
 | Field / rule | Default or bound | Source |
 |---|---|---|
-| `MaxSnapshotAge` | `30s` baseline for actively controlled providers; effective age is at least controller interval + `10s`, at most `70s` with valid config | `coordinator/autopilot/config.go`, `DefaultConfig`, `ControlSnapshotMaxAge` |
+| `MaxSnapshotAge` | `30s` baseline for actively controlled providers; effective age is at least controller interval + `10s`, at most `70s` with valid config | `coordinator/registry/autopilot/config.go`, `DefaultConfig`, `ControlSnapshotMaxAge` |
 | Ordinary/waiting/paused donor capacity | Normal `90s` serving heartbeat window; an accepted capacity sample is still required | `coordinator/registry/provider_lifecycle.go`, `DefaultProviderHeartbeatTimeout`; `autopilot_snapshot.go` |
 | `CommandAcceptTimeout` | `20s`; acceptance/first mutation, not total operation duration | `autopilot.DefaultConfig`; `provider-swift/Sources/ProviderCore/Autopilot/ProviderLoop+Autopilot.swift`, `checkAutopilotLoadOwnership` |
 | `CommandWatchdog` | `5m`; retain uncertain ownership rather than assume completion | `autopilot.DefaultConfig`; `coordinator/registry/autopilot_commands.go`, `markAutopilotWatchdogs` |
 | `FailureBackoff` | `2m` | `autopilot.DefaultConfig`; `coordinator/registry/autopilot_provider_state.go`, `reconcileAutopilotHeartbeatLocked` |
-| `MinBenefitSeconds` | `30` | `autopilot.DefaultConfig`; `coordinator/autopilot/planner.go`, `Plan` |
+| `MinBenefitSeconds` | `30` | `autopilot.DefaultConfig`; `coordinator/registry/autopilot/planner.go`, `Plan` |
 | Same-command sends | At most `3` total, separated by at least `30s`; immutable ID/payload/expiry | `coordinator/registry/autopilot_retries.go`, `retryAutopilotCommands` |
-| Standalone unload | Quiet, dwell, work and floor guards apply; no memory-pressure threshold | `coordinator/autopilot/planner.go`, `Plan` |
-| Demand retention | `10s` buckets, at most `256` models; partial boundary bucket retains < `10s` | `coordinator/autopilot/demand.go`, `DemandTracker.Record`, `DemandTracker.Snapshot` |
+| Standalone unload | Quiet, dwell, work and floor guards apply; no memory-pressure threshold | `coordinator/registry/autopilot/planner.go`, `Plan` |
+| Demand retention | `10s` buckets, at most `256` models; partial boundary bucket retains < `10s` | `coordinator/registry/autopilot/demand.go`, `DemandTracker.Record`, `DemandTracker.Snapshot` |
 
 Enrollment records permission and the selected builds. Only active coordinator
 control, or an explicit provider pause, transfers residency ownership away from

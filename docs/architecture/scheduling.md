@@ -625,7 +625,7 @@ and grow to the requested limit (`coordinator/store/postgres.go`,
 
 ## Experimental selected-model residency
 
-`coordinator/autopilot/planner.go` (`Plan`) adds guarded
+`coordinator/registry/autopilot/planner.go` (`Plan`) adds guarded
 capacity moves for explicitly enrolled providers. The controller splits logical
 work by request shape, prefers positive-benefit additions, protects all donor
 contributions during whole-device transitions, and revalidates at reservation.

@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/eigeninference/d-inference/coordinator/autopilot"
 	"github.com/eigeninference/d-inference/coordinator/registry"
+	"github.com/eigeninference/d-inference/coordinator/registry/autopilot"
 )
 
 type autopilotDemandKey struct{}

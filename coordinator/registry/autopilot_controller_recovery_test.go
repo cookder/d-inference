@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/eigeninference/d-inference/coordinator/autopilot"
 	"github.com/eigeninference/d-inference/coordinator/protocol"
+	"github.com/eigeninference/d-inference/coordinator/registry/autopilot"
 	"github.com/eigeninference/d-inference/coordinator/store"
 )
 

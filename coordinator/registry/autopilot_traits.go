@@ -1,6 +1,6 @@
 package registry
 
-import "github.com/eigeninference/d-inference/coordinator/autopilot"
+import "github.com/eigeninference/d-inference/coordinator/registry/autopilot"
 
 // AutopilotRequirements projects all hard routing traits without retaining tool
 // names, output policy or retry preferences in aggregate demand.

@@ -1,8 +1,8 @@
 package registry
 
 import (
-	"github.com/eigeninference/d-inference/coordinator/autopilot"
 	"github.com/eigeninference/d-inference/coordinator/env"
+	"github.com/eigeninference/d-inference/coordinator/registry/autopilot"
 )
 
 func autopilotConfigFromEnv() autopilot.Config {
