@@ -82,7 +82,7 @@ func (r *Registry) autopilotFleetSnapshotLocked(c *modelAutopilotController, dem
 			found := false
 			for key, d := range byModel[model.ID] {
 				found = true
-				if !r.providerPassesRoutingGatesLocked(p, model.ID, RequestTraits{HasTools: d.HasTools, RequiresToolConstraint: d.RequiresToolConstraint}, false, now) || (d.RequiresVision && !model.IsVision) {
+				if !r.providerPassesRoutingGatesLocked(p, model.ID, requestTraitsForAutopilot(d.Requirements), false, now) || (d.RequiresVision && !model.IsVision) {
 					continue
 				}
 				fit := r.autopilotModelFitLocked(p, model.ID, d, c.config)

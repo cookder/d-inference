@@ -10,16 +10,6 @@ import (
 // remains an exact catalog build; a cohort key is never sent to a provider.
 func ModelID(key string) string { model, _, _ := strings.Cut(key, "\x1f"); return model }
 func ShapeKey(s DemandSample) string {
-	flags := 0
-	if s.RequiresVision {
-		flags |= 1
-	}
-	if s.HasTools {
-		flags |= 2
-	}
-	if s.RequiresToolConstraint {
-		flags |= 4
-	}
 	input, output := 0, 0
 	for input < len(autopilotPromptBounds)-1 && s.PromptTokens > autopilotPromptBounds[input] {
 		input++
@@ -37,7 +27,7 @@ func ShapeKey(s DemandSample) string {
 			}
 		}
 	}
-	return fmt.Sprintf("%s\x1f%d:%d:%d:%d", s.Model, flags, input, output, deadline)
+	return fmt.Sprintf("%s\x1f%s:%d:%d:%d", s.Model, s.Requirements.cohortKey(), input, output, deadline)
 }
 
 func (d *DemandTracker) ShapeSnapshot(now time.Time, window time.Duration) map[string]DemandView {

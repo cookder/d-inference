@@ -2,14 +2,44 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/eigeninference/d-inference/coordinator/autopilot"
 	"github.com/eigeninference/d-inference/coordinator/registry"
 )
+
+func TestAutopilotDemandTracksFinalModelHardTraitsWithoutPrivateHints(t *testing.T) {
+	r, d, p := autopilotRequestFixture()
+	p.requiresVision = true
+	p.traits = &registry.RequestTraits{HasTools: false} // model resolver is authoritative
+	p.traitsForModel = func(model string) registry.RequestTraits {
+		traits := registry.RequestTraits{HasTools: true, ToolChoiceMode: "named", RequiresToolConstraint: true,
+			ToolChoiceName: "private-tool-name", AvoidVersion: "soft-retry-hint", ParallelToolCalls: true}
+		if model == "fallback-build" {
+			traits.RequiresNativeMediaTools = true
+			traits.MinPrefixCacheProtocol = 1
+		}
+		return traits
+	}
+	armAutopilotDemand(r, p)
+	setAutopilotDemandModel(r, "fallback-build", p.requestTraitsForModel("fallback-build"))
+	sample, ok := d.finish(http.StatusServiceUnavailable, false)
+	if !ok || sample.Model != "fallback-build" || sample.Requirements != p.traitsForModel("fallback-build").AutopilotRequirements(true) {
+		t.Fatalf("final model requirements lost: %+v", sample)
+	}
+	body, err := json.Marshal(sample)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), "private-tool-name") || strings.Contains(string(body), "soft-retry-hint") {
+		t.Fatal("request content or retry preferences leaked into demand")
+	}
+}
 
 func autopilotRequestFixture() (*http.Request, *autopilotDemandRequest, inferenceAdmissionParams) {
 	d := &autopilotDemandRequest{sample: autopilot.DemandSample{ReceivedAt: time.Now()}}
@@ -26,7 +56,7 @@ func TestAutopilotDemandCountsOneLogicalRequestAcrossRetrySignals(t *testing.T) 
 	for range 8 {
 		annotateAutopilotDemandRejection(rejectionInfo{r: r, resolvedModel: p.model, reasonCode: "machine_busy", httpStatus: 429})
 	}
-	setAutopilotDemandModel(r, "fallback-build")
+	setAutopilotDemandModel(r, "fallback-build", registry.RequestTraits{})
 	annotateAutopilotDemandRejection(rejectionInfo{r: r, resolvedModel: "fallback-build", reasonCode: "queue_deadline", httpStatus: 429})
 	sample, ok := d.finish(429, false)
 	if !ok || sample.Model != "fallback-build" || !sample.CapacityShed || sample.Reason != "deadline" {

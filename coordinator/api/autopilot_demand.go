@@ -61,17 +61,11 @@ func armAutopilotDemand(r *http.Request, p inferenceAdmissionParams) {
 	d.sample.Model = p.model
 	d.sample.PromptTokens = p.estimatedPromptTokens
 	d.sample.RequestedMaxTokens = p.requestedMaxTokens
-	d.sample.RequiresVision = p.requiresVision
-	d.sample.HasTools = p.hasTools
-	if p.traits != nil {
-		d.sample.RequiresToolConstraint = p.traits.RequiresToolConstraint
-	} else if p.traitsForModel != nil {
-		d.sample.RequiresToolConstraint = p.traitsForModel(p.model).RequiresToolConstraint
-	}
+	d.sample.Requirements = p.requestTraitsForModel(p.model).AutopilotRequirements(p.requiresVision)
 	d.armed = true
 }
 
-func setAutopilotDemandModel(r *http.Request, model string) {
+func setAutopilotDemandModel(r *http.Request, model string, traits registry.RequestTraits) {
 	d := autopilotDemandFromContext(r.Context())
 	if d == nil || model == "" || len(model) > 256 {
 		return
@@ -79,6 +73,7 @@ func setAutopilotDemandModel(r *http.Request, model string) {
 	d.mu.Lock()
 	if !d.finished {
 		d.sample.Model = model
+		d.sample.Requirements = traits.AutopilotRequirements(d.sample.RequiresVision)
 	}
 	d.mu.Unlock()
 }

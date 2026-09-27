@@ -14,21 +14,19 @@ import (
 // unfinished request: the planner must independently use live occupancy as a
 // lower bound on demand, not add occupancy to this same workload a second time.
 type DemandSample struct {
-	DeadlineKnown          bool
-	FirstContentDeadline   time.Duration
-	Model                  string
-	ReceivedAt             time.Time
-	PromptTokens           int
-	RequestedMaxTokens     int
-	RequiresVision         bool
-	HasTools               bool
-	RequiresToolConstraint bool
-	CapacityShed           bool
-	Completed              bool
-	ServiceTime            time.Duration
-	ObservedPromptTokens   int
-	ObservedOutputTokens   int
-	Reason                 string
+	Requirements
+	DeadlineKnown        bool
+	FirstContentDeadline time.Duration
+	Model                string
+	ReceivedAt           time.Time
+	PromptTokens         int
+	RequestedMaxTokens   int
+	CapacityShed         bool
+	Completed            bool
+	ServiceTime          time.Duration
+	ObservedPromptTokens int
+	ObservedOutputTokens int
+	Reason               string
 }
 
 const (
@@ -49,7 +47,7 @@ type autopilotDemandBucket struct {
 	promptSum, requestedOutputSum, observedOutputSum float64
 	serviceSeconds                                   float64
 	prompts                                          [8]int
-	vision, tools, grammar                           bool
+	requirements                                     Requirements
 }
 type autopilotModelDemand struct {
 	first, last time.Time               // accepted arrival times, never terminal refresh times
@@ -62,6 +60,7 @@ type DemandTracker struct {
 	models map[string]*autopilotModelDemand
 }
 type DemandView struct {
+	Requirements
 	DeadlineKnown                                     bool
 	DeadlineSeconds                                   float64
 	Sustained                                         bool
@@ -70,12 +69,11 @@ type DemandView struct {
 	OutputTokens, RequestedMaxTokens                  int
 	ServiceSeconds                                    float64
 	Requests, CapacityShed, Completed, ServiceSamples int
-	RequiresVision, HasTools, RequiresToolConstraint  bool
 	LastDemand                                        time.Time
 }
 
 func (d *DemandTracker) Record(s DemandSample, now time.Time, window time.Duration) {
-	if window <= 0 || window > autopilotDemandMaxWindow || now.IsZero() ||
+	if !s.Requirements.valid() || window <= 0 || window > autopilotDemandMaxWindow || now.IsZero() ||
 		s.Model == "" || len(s.Model) > 256 || s.PromptTokens <= 0 || s.PromptTokens > autopilotDemandMaxTokens ||
 		s.RequestedMaxTokens < 0 || s.RequestedMaxTokens > autopilotDemandMaxTokens {
 		return
@@ -161,9 +159,7 @@ func (d *DemandTracker) Record(s DemandSample, now time.Time, window time.Durati
 			break
 		}
 	}
-	b.vision = b.vision || s.RequiresVision
-	b.tools = b.tools || s.HasTools
-	b.grammar = b.grammar || s.RequiresToolConstraint
+	b.requirements.merge(s.Requirements)
 	if s.Completed && s.ObservedOutputTokens >= 0 && s.ObservedOutputTokens <= autopilotDemandMaxTokens {
 		// A real completion supplies output even when cold loading, unknown
 		// timing, or a very long request makes warm service time unusable.
@@ -234,9 +230,7 @@ func (d *DemandTracker) Snapshot(now time.Time, window time.Duration) map[string
 			sum.requestedOutputSum += b.requestedOutputSum
 			sum.observedOutputSum += b.observedOutputSum
 			sum.serviceSeconds += b.serviceSeconds
-			sum.vision = sum.vision || b.vision
-			sum.tools = sum.tools || b.tools
-			sum.grammar = sum.grammar || b.grammar
+			sum.requirements.merge(b.requirements)
 			for i, count := range b.prompts {
 				sum.prompts[i] += count
 			}
@@ -249,7 +243,7 @@ func (d *DemandTracker) Snapshot(now time.Time, window time.Duration) map[string
 			Sustained:  observedBuckets >= 3 && sum.requests >= autopilotDemandMinSamples,
 			LastDemand: m.last, Requests: sum.requests, CapacityShed: sum.shed,
 			Completed: sum.completed, ServiceSamples: sum.serviceSamples,
-			RequiresVision: sum.vision, HasTools: sum.tools, RequiresToolConstraint: sum.grammar,
+			Requirements: sum.requirements,
 		}
 		if sum.requests > 0 {
 			elapsed := math.Max(autopilotDemandBucketWidth.Seconds(), math.Min(window.Seconds(), now.Sub(m.first).Seconds()))

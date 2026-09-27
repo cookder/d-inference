@@ -36,7 +36,7 @@ extension ProviderLoop {
     func recordAutopilotLoadTime(model: String, milliseconds: Int64) {
         loadAutopilotTimingHistory()
         autopilotTimingHistory.record(.init(modelId: model, loadMs: milliseconds,
-            measuredAtMs: Int64(Date().timeIntervalSince1970 * 1_000), weightHash: modelHashes[model] ?? ""))
+            measuredAtMs: Int64(Date().timeIntervalSince1970 * 1_000), weightHash: liveModelHashes[model] ?? ""))
         if let url = autopilotHistoryURL {
             do { try autopilotTimingHistory.write(to: url) }
             catch { logger.warning("Could not persist Autopilot load timings") }

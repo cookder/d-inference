@@ -1,6 +1,6 @@
 # Experimental model Autopilot
 
-> Last updated: 2026-09-27 · commit `a2ec0da03`
+> Last updated: 2026-09-27 · commit `cd7abd5a2`
 
 Autopilot manages memory residency for an explicitly selected set of provider
 models. Provider enrollment defaults to off. After selection and verification,
@@ -89,15 +89,19 @@ account rejections, invalid requests and coordinator lock saturation do not
 create placement pressure. Structural provider memory/token refusals remain
 supply demand; canonical context violations are intrinsically invalid.
 
-`autopilotShapeKey` splits exact model builds by vision/tools/constraint flags,
-eight prompt-size bins, four output-limit bins and the resolved first-content
-SLA class. Deadline-exempt requests retain that policy; no account identity is stored. The bounded shape tracker
-retains no prompts or consumer identities. Ordinary workload moves require at
+`autopilot.ShapeKey` splits exact model builds by every hard routing requirement
+(vision, tools, sampler constraints, native media tools, tool-choice mode and
+minimum prefix-cache protocol), eight prompt-size bins, four output-limit bins
+and the resolved first-content SLA class. Admission captures the requirements
+for the final selected build, including alias fallback. The registry applies
+its normal routing gates to each cohort before crediting provider capacity.
+Deadline-exempt requests retain that policy. The bounded tracker retains no
+prompts, tool names, soft retry preferences or consumer identities. Ordinary workload moves require at
 least eight observations over three occupied ten-second buckets. Initial
 bootstrap and protected-floor repairs may act sooner. Shape-specific eligibility
 prevents a specialized request from excluding a provider from ordinary traffic.
 
-`autopilotNodeContribution` divides one machine's execution capacity among its
+`autopilot.NodeContribution` divides one machine's execution capacity among its
 resident workloads. The planner combines offered work and live occupancy with
 `max`, avoiding double counting. It debits every retained and removed model on a
 machine during a transition, and pending capacity never protects current donor
@@ -123,7 +127,9 @@ remain authoritative. Optional MTP can fall back to the target alone and cannot
 initiate an Autopilot download.
 
 `ModelAutopilotHistory` retains bounded load measurements after unloading and
-restart, keyed by exact model ID and verified weight hash. The planner accepts
+restart, keyed by exact model ID and the current verified weight hash published
+by the load path. A hash refreshed after startup replaces the startup identity;
+a missing live hash cannot create a timing measurement. The planner accepts
 recent matching measurements and otherwise uses the configured prior. Provider
 status records load, release and total operation duration; coordinator records
 also include time until the authoritative terminal heartbeat. None is a promise
@@ -177,6 +183,7 @@ its own `Start/` folder.
 | Live local controls | `provider-swift/Sources/darkbloom/Autopilot/AutopilotCommand.swift`; `provider-swift/Sources/ProviderCore/Autopilot/ProviderLoop+AutopilotControl.swift` |
 | Protocol | `coordinator/protocol/model_autopilot.go`; `provider-swift/Sources/ProviderCore/Protocol/Autopilot/ModelAutopilot.swift` |
 | Shapes and planning | `coordinator/autopilot/shapes.go`; `coordinator/autopilot/coverage.go`; `coordinator/autopilot/planner.go` |
+| Hard request eligibility | `coordinator/autopilot/requirements.go`; `coordinator/registry/autopilot_traits.go` |
 | Demand and policy defaults | `coordinator/autopilot/demand.go`; `coordinator/autopilot/config.go` |
 | Activation and execution | `coordinator/registry/autopilot_activation.go`; `coordinator/registry/autopilot_commands.go`; `provider-swift/Sources/ProviderCore/Autopilot/ProviderLoop+Autopilot.swift` |
 | Durable records | `coordinator/store/postgres_autopilot.go`; `coordinator/registry/autopilot_events.go` |
