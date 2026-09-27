@@ -166,6 +166,7 @@ func verifyRegistryKVBackends(
 
 	deadline := time.Now().Add(timeout)
 	pending := targets
+	nextDiagnostic := time.Now().Add(30 * time.Second)
 	for {
 		var stillPending []kvSlotTarget
 		for _, t := range pending {
@@ -187,6 +188,15 @@ func verifyRegistryKVBackends(
 		}
 		if len(stillPending) == 0 {
 			return nil
+		}
+		if !time.Now().Before(nextDiagnostic) {
+			for _, target := range stillPending {
+				if target.autopilot {
+					logAutopilotStartupDiagnostics(reg, logger)
+					break
+				}
+			}
+			nextDiagnostic = time.Now().Add(30 * time.Second)
 		}
 		if time.Now().After(deadline) {
 			names := make([]string, len(stillPending))
