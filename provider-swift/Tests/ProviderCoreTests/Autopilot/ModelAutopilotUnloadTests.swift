@@ -116,8 +116,10 @@ struct ModelAutopilotUnloadTests {
         #expect(await loop.autopilotLoadedIDs() == ["keep", "local"])
     }
 
-    @Test func releaseCleanupOnlyRetiresExplicitInactiveUnpinnedBuilds() async throws {
+    @Test(arguments: [false, true])
+    func releaseCleanupOnlyRetiresExplicitInactiveUnpinnedBuilds(paused: Bool) async throws {
         let (loop, engines) = try await fixture(pins: ["keep"])
+        if paused { await loop.configurePinOwnershipForTest("paused") }
         await loop.markAutopilotResidentOld("old", superseded: true)
         await loop.markAutopilotResidentOld("keep", superseded: true)
         await loop.markAutopilotResidentOld("local", local: true, superseded: true)

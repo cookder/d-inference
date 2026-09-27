@@ -70,25 +70,4 @@ func hasDemandForModel(demand map[string]DemandView, model string) bool {
 	return false
 }
 
-func autopilotDemandShare(f Fleet, key string) float64 {
-	total := demandForModel(f.Demand, ModelID(key)).Rate
-	if total > 0 {
-		return f.Demand[key].Rate / total
-	}
-	queued, cohorts := 0, 0
-	for other, d := range f.Demand {
-		if ModelID(other) == ModelID(key) {
-			queued += max(0, d.Queued)
-			cohorts++
-		}
-	}
-	if queued > 0 {
-		return float64(max(0, f.Demand[key].Queued)) / float64(queued)
-	}
-	if cohorts > 0 {
-		return 1 / float64(cohorts)
-	}
-	return 1
-}
-
 func ShapeLabel(key string) string { _, shape, _ := strings.Cut(key, "\x1f"); return shape }

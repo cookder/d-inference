@@ -1,6 +1,6 @@
 # Experimental model Autopilot
 
-> Last updated: 2026-09-27 · commit `f8c8d30ac`
+> Last updated: 2026-09-27 · commit `becb09c8a`
 
 Autopilot manages memory residency for an explicitly selected set of provider
 models. Provider enrollment defaults to off. After selection and verification,
@@ -104,14 +104,18 @@ prompts, tool names, soft retry preferences or consumer identities. Ordinary wor
 least eight observations over three occupied ten-second buckets. Initial
 bootstrap and protected-floor repairs may act sooner. Shape-specific eligibility
 prevents a specialized request from excluding a provider from ordinary traffic.
-Current public, unrestricted queue entries are projected into these same cohorts
-before placement, including remaining first-content allowance. Cancelled, expired,
-owner/prefer-owner and provider-restricted entries are excluded. Queue counts are
-an ephemeral occupancy lower bound and never add logical arrivals to the tracker.
-Queued work can justify an immediate compatible placement without waiting for its
-first terminal observation. Active slot occupancy is shared once across cohorts;
-it is combined with queue occupancy and compared with offered work using `max`.
-Admin model summaries expose the separate `queued_requests` count.
+Current public, unrestricted queued and in-flight requests are projected into
+these same cohorts before placement. Queue entries retain remaining first-content
+allowance; in-flight requests retain their original allowance from immutable
+request-profile timestamps. Owner/prefer-owner, provider-restricted, cancelled,
+completed and malformed entries are excluded. A transient request-ID set prevents
+counting a queue-to-provider handoff twice; no IDs enter policy or history.
+These live counts never add logical arrivals to the terminal tracker. They can
+justify compatible placement before a terminal observation exists. Raw slot
+activity is not demand: private, local or unattributed GPU work instead withholds
+that device's public capacity contribution. The planner compares qualified live
+work with offered work using `max`. Admin summaries expose `queued_requests` and
+`public_inflight_requests` separately.
 
 `autopilot.NodeContribution` divides one machine's execution capacity among its
 resident workloads. The planner combines offered work and live occupancy with
@@ -152,6 +156,12 @@ actual resident sets, predicted benefit and measured durations. Intent must be
 persisted before dispatch. Ledger failure suspends new operations while pending
 outcomes remain queued for retry. Existing request-outcome records provide the
 completion and first-content evidence for comparisons by model/shape/window.
+Terminal reconciliation compares the operation with a bounded copy of the same
+accepted heartbeat's raw resident slots. Catalog-filtered slots remain the sole
+routing capacity. Catalog removal or capability revocation can therefore finish
+an operation without restoring routing to the retired model. Reports without a
+fresh sequence, oversized reports and unexpected resident IDs retain the fence.
+
 A command proven not to have entered the writer queue records a failed terminal
 phase with unchanged residency. A failed retry cannot erase uncertain delivery. Initial commands and retries
 use the bounded priority enqueue path, so stalled sockets cannot block the
@@ -182,8 +192,10 @@ A failed target load may leave fewer residents; the terminal heartbeat reports
 that actual state. An ambiguous operation stays fenced until reconciled.
 After a coordinator restart, provider registration and paired capacity rebuild
 live ownership; historical incomplete ledger phases remain evidence of
-uncertainty rather than proof of success. Disk files are never deleted by a
-residency decision.
+uncertainty rather than proof of success. Explicitly superseded, unadvertised residents can be cleaned up under active
+control or explicit pause. Pins, accepted commands, requests, local reservations
+and ongoing model work still block that cleanup. Disk files are never deleted by
+a residency decision.
 
 ## Code map
 

@@ -89,7 +89,7 @@ func Plan(f Fleet, cfg Config, now time.Time) *Action {
 			floorShort := c.Warm[ModelID(m)] < floor(f, ModelID(m)) && c.Future[m] == 0
 			bootstrap := !hasPlacementNeed && len(n.Residents) == 0 && n.State != nil && n.State.LastCommandID == "" && c.Future[m] == 0
 			floorShort = floorShort || bootstrap
-			if !floorShort && ShapeLabel(m) != "" && !f.Demand[m].Sustained && f.Demand[m].Queued == 0 {
+			if !floorShort && ShapeLabel(m) != "" && !f.Demand[m].Sustained && f.Demand[m].Queued == 0 && f.Demand[m].InFlight == 0 {
 				continue
 			}
 			gap := c.Need[m] - c.Ready[m] - c.Future[m]

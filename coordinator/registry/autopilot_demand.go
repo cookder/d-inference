@@ -1,8 +1,9 @@
 package registry
 
 import (
-	"github.com/eigeninference/d-inference/coordinator/registry/autopilot"
 	"time"
+
+	"github.com/eigeninference/d-inference/coordinator/registry/autopilot"
 )
 
 func (r *Registry) AutopilotEnabled() bool {

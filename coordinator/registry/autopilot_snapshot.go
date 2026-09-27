@@ -21,8 +21,10 @@ func (r *Registry) autopilotFleetSnapshot(c *modelAutopilotController, now time.
 // runs under these locks. Reservation calls this with r.mu exclusive so donor
 // protection is recalculated against current, not stale proposed, placements.
 func (r *Registry) autopilotFleetSnapshotLocked(c *modelAutopilotController, demand map[string]autopilot.DemandView, now time.Time) autopilotFleet {
+	active, activeIDs, unscoped := r.autopilotActiveSamplesLocked()
+	demand = autopilot.WithActiveDemand(demand, active)
 	if r.queue != nil {
-		demand = autopilot.WithQueuedDemand(demand, r.queue.autopilotSamples(now))
+		demand = autopilot.WithQueuedDemand(demand, r.queue.autopilotSamples(now, activeIDs))
 	}
 	byModel := make(map[string]map[string]autopilot.DemandView)
 	for key, d := range demand {
@@ -32,7 +34,7 @@ func (r *Registry) autopilotFleetSnapshotLocked(c *modelAutopilotController, dem
 		}
 		byModel[model][key] = d
 	}
-	f := autopilotFleet{Fleet: autopilot.Fleet{Demand: demand, Floors: map[string]int{}, Occupancy: map[string]int{}, Excluded: map[string]int{}}, sessions: map[string]*Provider{}}
+	f := autopilotFleet{Fleet: autopilot.Fleet{Demand: demand, Floors: map[string]int{}, Excluded: map[string]int{}}, sessions: map[string]*Provider{}}
 	if r.warmPool != nil {
 		for m, n := range r.warmPool.config.MinWarmByModel {
 			f.Floors[m] = n
@@ -47,6 +49,7 @@ func (r *Registry) autopilotFleetSnapshotLocked(c *modelAutopilotController, dem
 		f.sessions[p.ID] = p
 		p.mu.Lock()
 		n := autopilot.Node{ID: p.ID, Seq: p.capacitySeq, Managed: providerAutopilotManagedLocked(p) || (c.config.ObserveOnly && providerAutopilotConsentedLocked(p) && !p.ModelAutopilot.Paused), Pending: providerAutopilotTransitionLocked(p), MemoryPressure: p.SystemMetrics.MemoryPressure, Fits: map[string]autopilot.ModelFit{}}
+		n.UnscopedBusy = unscoped[p.ID]
 		n.Uncertain = p.autopilotPending != nil && p.autopilotPending.Uncertain
 		maxAge := c.config.ControlSnapshotMaxAge()
 		if !providerAutopilotControlActiveLocked(p) {
@@ -69,9 +72,6 @@ func (r *Registry) autopilotFleetSnapshotLocked(c *modelAutopilotController, dem
 		if n.Managed && !autopilotStateMatchesCapacity(p) {
 			n.Idle = false
 			f.Excluded["unreconciled_state"]++
-		}
-		for _, slot := range p.BackendCapacity.Slots {
-			f.Occupancy[slot.Model] += max(0, slot.NumRunning) + max(0, slot.NumWaiting)
 		}
 		for _, model := range p.Models {
 			if p.ModelAutopilot != nil && p.ModelAutopilot.Enabled && !providerAutopilotAllowsLocked(p, model.ID) {
@@ -153,7 +153,7 @@ func (r *Registry) autopilotModelFitLocked(p *Provider, model string, d autopilo
 		return autopilot.ModelFit{}
 	}
 	prompt, output := max(1, d.PromptTokens), max(1, d.OutputTokens)
-	if d.Requests == 0 && d.Queued == 0 {
+	if d.Requests == 0 && d.Queued == 0 && d.InFlight == 0 {
 		prompt = 512
 		output = 256
 	}
@@ -225,7 +225,7 @@ func (r *Registry) autopilotModelFitLocked(p *Provider, model string, d autopilo
 		maxOutput = 256
 	}
 	envelope := int64(tail) + int64(maxOutput)
-	if (d.Requests > 0 || d.Queued > 0) && (budget <= 0 || envelope > budget) {
+	if (d.Requests > 0 || d.Queued > 0 || d.InFlight > 0) && (budget <= 0 || envelope > budget) {
 		fit.MeetsDeadline = false
 	}
 	return fit

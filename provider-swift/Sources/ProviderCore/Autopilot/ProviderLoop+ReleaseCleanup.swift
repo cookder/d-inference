@@ -6,7 +6,7 @@ extension ProviderLoop {
     /// This path cannot infer retirement from an absent catalog entry and never
     /// takes a still-supported co-resident out of service.
     internal func cleanupAutopilotSupersededModels() async {
-        guard modelAutopilotEnabled, autopilotCommand == nil, !isShuttingDown,
+        guard autopilotManagesResidency, autopilotCommand == nil, !isShuttingDown,
               !isDraining, !isLoadingAny, !isReslicing,
               engineV2RecoveryInProgress.isEmpty else { return }
         var attempts = 0

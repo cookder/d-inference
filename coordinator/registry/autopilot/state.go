@@ -1,10 +1,11 @@
 package autopilot
 
 import (
-	"github.com/eigeninference/d-inference/coordinator/protocol"
 	"math"
 	"slices"
 	"sort"
+
+	"github.com/eigeninference/d-inference/coordinator/protocol"
 )
 
 func CloneState(in *protocol.ModelAutopilotState) *protocol.ModelAutopilotState {
@@ -112,4 +113,20 @@ func StateMatchesCapacity(state *protocol.ModelAutopilotState, capacity *protoco
 		}
 	}
 	return len(residents) == 0
+}
+
+// CloneReportedCapacity keeps only bounded residency/sequence evidence. It is
+// separate from catalog-filtered routing capacity and never supplies budgets.
+func CloneReportedCapacity(in *protocol.BackendCapacity) *protocol.BackendCapacity {
+	if in == nil || len(in.Slots) > 32 {
+		return nil
+	}
+	out := &protocol.BackendCapacity{CapacitySeq: in.CapacitySeq}
+	for _, slot := range in.Slots {
+		if slot.Model == "" || len(slot.Model) > 256 || len(slot.State) > 32 {
+			return nil
+		}
+		out.Slots = append(out.Slots, protocol.BackendSlotCapacity{Model: slot.Model, State: slot.State})
+	}
+	return out
 }

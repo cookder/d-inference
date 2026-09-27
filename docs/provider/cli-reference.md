@@ -1,6 +1,6 @@
 # Provider CLI reference
 
-> Last updated: 2026-09-27 · commit `3030474d7`
+> Last updated: 2026-09-27 · commit `becb09c8a`
 
 Reference for the `darkbloom` command-line tool: every subcommand and flag, the
 files and identifiers it creates, the `provider.toml` keys it reads with their
@@ -465,8 +465,8 @@ Every subcommand accepts `--config`.
 | `status`, `status --json` | Configured consent and fresh daemon state, including selected/ready models and transition result |
 | `enable` | Start the model picker, download/verify selections, and safely start active experimental enrollment |
 | `models` | Change the selected set through the same download/verify/drain/restart flow |
-| `pause`, `resume` | Live policy update; pause preserves resident models and blocks new automatic changes |
-| `pin MODEL_ID...`, `unpin MODEL_ID...` | Live update of unload protection; pins must belong to the selected set |
+| `pause`, `resume` | Live policy update; pause preserves ready models and blocks new demand-based changes. Retired, unadvertised residents may still unload when unpinned and unused |
+| `pin MODEL_ID...`, `unpin MODEL_ID...` | Live unload protection during active control, explicit pause or an accepted operation; pins must belong to the selected set |
 | `disable` | Revoke new commands and restore the saved idle policy after any accepted operation finishes |
 | `start --autopilot --model ID` | Explicit scripted enrollment for the specified local model(s); repeat `--model` for multiple |
 | `start --no-autopilot` | Explicitly save the ordinary idle-policy mode |

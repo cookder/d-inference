@@ -10,15 +10,14 @@ import (
 // Copy only immutable eligibility/envelope fields while queue membership is
 // locked. Restricted/owner traffic does not create public placement pressure.
 // No bodies, tool names, account identities or provider restrictions escape.
-func (q *RequestQueue) autopilotSamples(now time.Time) []autopilot.DemandSample {
+func (q *RequestQueue) autopilotSamples(now time.Time, activeIDs map[string]bool) []autopilot.DemandSample {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	var samples []autopilot.DemandSample
 	for model, requests := range q.queues {
 		for _, queued := range requests {
 			p := queued.Pending
-			if p == nil || p.Model != model || p.SelfRouteOnly || p.PreferOwner ||
-				len(p.AllowedProviderSerials) > 0 || len(p.ExcludedProviderIDs) > 0 ||
+			if !publicAutopilotPending(p) || p.Model != model || activeIDs[queued.RequestID] ||
 				now.Sub(queued.EnqueuedAt) >= q.maxWait {
 				continue
 			}

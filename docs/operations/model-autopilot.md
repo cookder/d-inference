@@ -1,6 +1,6 @@
 # Experimental Autopilot operation and recovery
 
-> Last updated: 2026-09-27 · commit `78725b45b`
+> Last updated: 2026-09-27 · commit `becb09c8a`
 
 Use this runbook to operate active, explicitly enrolled providers and inspect
 residency outcomes. Provider Autopilot defaults off; setup enables active control
@@ -35,8 +35,9 @@ Use with compatible protocol-2 coordinator and provider releases. See the
 3. Use `darkbloom autopilot pin MODEL_ID` to protect a selected model. Use `unpin`
    to remove that protection. Changes are applied at the next capacity poll;
    status reports a configuration revision waiting to apply when appropriate.
-4. Use `darkbloom autopilot pause` to stop new automatic residency changes while
-   retaining current ready models; `resume` asks for active control again.
+4. Use `darkbloom autopilot pause` to stop new demand-based residency changes while
+   retaining current ready models; `resume` asks for active control again. Retired,
+   unadvertised models may still be released once unpinned and unused.
    `darkbloom autopilot models` changes the approved selection through the picker,
    downloads, verification, drain and restart flow.
 5. Inspect authenticated `GET /v1/admin/autopilot`. It returns controller summary

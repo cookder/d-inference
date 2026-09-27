@@ -26,7 +26,7 @@ func autopilotStateMatchesCapacity(p *Provider) bool {
 
 // Called only after the accepted capacity-sequence gate, under p.mu. Status
 // messages alone never clear reservations or manufacture warm slot capacity.
-func (r *Registry) reconcileAutopilotHeartbeatLocked(p *Provider, state *protocol.ModelAutopilotState, now time.Time) {
+func (r *Registry) reconcileAutopilotHeartbeatLocked(p *Provider, state *protocol.ModelAutopilotState, reported *protocol.BackendCapacity, now time.Time) {
 	p.ModelAutopilot = autopilot.CloneState(state)
 	pending := p.autopilotPending
 	if pending == nil || state == nil || p.capacitySeq <= pending.CapacitySeq || state.ActiveCommandID != "" || state.LastCommandID != pending.Command.CommandID {
@@ -35,16 +35,27 @@ func (r *Registry) reconcileAutopilotHeartbeatLocked(p *Provider, state *protoco
 	if state.LastCommandStatus != protocol.LoadModelStatusSucceeded && state.LastCommandStatus != protocol.LoadModelStatusFailed {
 		return
 	}
-	// A disabled report can acknowledge opt-out completion; its resident list
-	// must still exactly match the same accepted backend snapshot.
-	enabled := state.Enabled
-	if !enabled {
-		copy := autopilot.CloneState(state)
-		copy.Enabled = true
-		p.ModelAutopilot = copy
+	// Reconcile actual residency from this same sequenced wire snapshot. The
+	// catalog may revoke an old resident while the command is in flight; its
+	// canonical slot must stay excluded from routing without stranding ownership.
+	if reported == nil || reported.CapacitySeq != p.capacitySeq {
+		return
 	}
-	matches := autopilotStateMatchesCapacity(p)
-	p.ModelAutopilot = autopilot.CloneState(state)
+	actual := autopilot.CloneState(state)
+	actual.Enabled = true // opt-out can acknowledge an accepted operation
+	allowed := make(map[string]bool)
+	for _, model := range pending.Command.ExpectedResidentModels {
+		allowed[model] = true
+	}
+	if pending.Command.LoadModelID != "" {
+		allowed[pending.Command.LoadModelID] = true
+	}
+	for _, resident := range actual.ResidentModels {
+		if !allowed[resident.ModelID] {
+			return
+		}
+	}
+	matches := autopilot.StateMatchesCapacity(actual, reported, p.capacitySeq)
 	if !matches {
 		return
 	}

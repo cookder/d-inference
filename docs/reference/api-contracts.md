@@ -1,6 +1,6 @@
 # HTTP API contracts
 
-> Last updated: 2026-09-27 · commit `f8c8d30ac`
+> Last updated: 2026-09-27 · commit `becb09c8a`
 
 The complete public HTTP surface of the coordinator, derived from the 117 `HandleFunc` registrations in `routes()` (`coordinator/api/server.go`), including the `/v1/` catch-all. Every route is listed once below with its handler symbol, authentication requirement, and rate-limit bucket; the second half of the page gives the wire shapes, headers, error table, SSE framing, limits, timeouts, and version-gate semantics that those routes share. For *why* the pipeline is built this way see [`../architecture/components/consumer.md`](../architecture/components/consumer.md); for the crypto model behind sealed transport see [`../architecture/security/encryption.md`](../architecture/security/encryption.md).
 
@@ -845,8 +845,9 @@ authenticated adapter `coordinator/api/autopilot_handlers.go` (`handleAdminAutop
 | `GET /v1/me/providers` | Provider owner | Optional `model_autopilot` live snapshot with consent, exact selected models, active/paused state and last operation |
 
 Each model summary separates completed logical observations (`logical_requests`)
-from current qualified public queue occupancy (`queued_requests`). Queue snapshots
-do not increment arrival history.
+from current qualified public queue occupancy (`queued_requests`) and in-flight
+reservations (`public_inflight_requests`). Live snapshots do not increment arrival
+history. Private/local or unattributed slot work creates no public placement demand.
 
 The operator pause lasts for the current coordinator process. Intent is persisted
 before dispatch. Ledger read/write errors are not success or rollback evidence.

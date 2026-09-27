@@ -18,6 +18,9 @@ type CoverageView struct {
 // must not receive useful capacity credit or hide a deadline-qualified deficit.
 func NodeContribution(n Node, residents []string, demand map[string]DemandView) map[string]float64 {
 	out := make(map[string]float64)
+	if n.UnscopedBusy {
+		return out
+	}
 	weights := make(map[string]float64)
 	total := 0.0
 	for model, fit := range n.Fits {
@@ -63,11 +66,6 @@ func Coverage(f Fleet) CoverageView {
 	for m := range f.Demand {
 		models[m] = true
 	}
-	for m := range f.Occupancy {
-		if !hasDemandForModel(f.Demand, m) {
-			models[m] = true
-		}
-	}
 	for m := range f.Floors {
 		if !hasDemandForModel(f.Demand, m) {
 			models[m] = true
@@ -90,8 +88,8 @@ func Coverage(f Fleet) CoverageView {
 		// Occupancy and offered-work estimates overlap. Use max, NEVER sum.
 		// Include occupancy-only models whose first logical terminal has not
 		// arrived yet, both in demand and in shared-GPU time allocation.
-		active := float64(max(0, f.Occupancy[ModelID(m)])) * autopilotDemandShare(f, m)
-		c.Need[m] = math.Max(rate, (active+float64(max(0, d.Queued)))/c.Reference[m])
+		live := max(0, d.InFlight) + max(0, d.Queued)
+		c.Need[m] = math.Max(rate, float64(live)/c.Reference[m])
 		d.Rate = c.Need[m]
 		c.Workload[m] = d
 	}

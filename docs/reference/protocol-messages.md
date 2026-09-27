@@ -1,6 +1,6 @@
 # Provider ↔ coordinator protocol messages
 
-> Last updated: 2026-09-27 · commit `a2ec0da03`
+> Last updated: 2026-09-27 · commit `becb09c8a`
 
 Every JSON frame on the provider WebSocket (`GET /ws/provider`), with the Go
 type, the Swift type, and the presence rule for each field. Go is the canon
@@ -954,7 +954,8 @@ Go `UsageInfo` · Swift `UsageInfo`.
 
 Opted-in providers accept explicit victim lists through `model_autopilot`.
 There is no separate generic unload command. The provider's ordinary idle timer
-is paused while enrolled, and commands cannot fall through to implicit LRU
+is paused during active control or an explicit pause. Recorded consent alone
+does not pause it while waiting or after lease expiry. Commands cannot fall through to implicit LRU
 victims. Standalone surplus unloading follows the configured quiet window; load-driven replacement
 still requires all dwell, memory, pin and donor protections.
 

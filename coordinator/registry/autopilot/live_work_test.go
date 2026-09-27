@@ -29,20 +29,21 @@ func TestQueuedDemandPreservesShapeWithoutRecordingArrivals(t *testing.T) {
 	}
 }
 
-func TestQueuedCohortsShareAnonymousActiveOccupancyOnce(t *testing.T) {
+func TestQualifiedActiveAndQueuedCohortsCountEachRequestOnce(t *testing.T) {
 	plain := DemandSample{Model: "model", PromptTokens: 100, RequestedMaxTokens: 64, DeadlineKnown: true}
 	vision := plain
 	vision.RequiresVision = true
-	demand := WithQueuedDemand(nil, []DemandSample{plain, vision, vision, vision})
+	demand := WithActiveDemand(nil, []DemandSample{plain, plain, vision, vision, vision, vision})
+	demand = WithQueuedDemand(demand, []DemandSample{plain, vision, vision, vision})
 	plainKey, visionKey := ShapeKey(plain), ShapeKey(vision)
-	f := Fleet{Demand: demand, Occupancy: map[string]int{"model": 6}, Nodes: []Node{{Fits: map[string]ModelFit{
+	f := Fleet{Demand: demand, Nodes: []Node{{Fits: map[string]ModelFit{
 		plainKey: {Rate: 10, ServiceSeconds: 1, MeetsDeadline: true}, visionKey: {Rate: 10, ServiceSeconds: 1, MeetsDeadline: true},
 	}}}}
 	coverage := Coverage(f)
 	if _, exists := coverage.Need["model"]; exists {
 		t.Fatal("queued shapes created weaker base-model pressure")
 	}
-	if math.Abs(coverage.Need[plainKey]-2.5) > 1e-9 || math.Abs(coverage.Need[visionKey]-7.5) > 1e-9 {
+	if math.Abs(coverage.Need[plainKey]-3) > 1e-9 || math.Abs(coverage.Need[visionKey]-7) > 1e-9 {
 		t.Fatalf("active work was duplicated across queued shapes: %+v", coverage.Need)
 	}
 }

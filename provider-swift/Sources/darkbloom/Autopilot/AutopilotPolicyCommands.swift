@@ -12,7 +12,8 @@ extension Autopilot {
         }
     }
     struct Pause: AsyncParsableCommand {
-        static let configuration = CommandConfiguration(abstract: "Pause new automatic residency changes.")
+        static let configuration = CommandConfiguration(abstract: "Pause demand-based model changes.",
+            discussion: "Retired, unadvertised models may still unload. Pins and active work remain protected.")
         @OptionGroup var configOptions: ConfigOptions
         mutating func run() async throws { try changeAutopilotPolicy(configPath: configOptions.config) { $0.paused = true }; print("Autopilot pause requested.") }
     }
@@ -22,7 +23,8 @@ extension Autopilot {
         mutating func run() async throws { try changeAutopilotPolicy(configPath: configOptions.config) { $0.paused = false }; print("Autopilot resume requested.") }
     }
     struct Pin: AsyncParsableCommand {
-        static let configuration = CommandConfiguration(abstract: "Protect selected models from automatic unloading.")
+        static let configuration = CommandConfiguration(abstract: "Protect selected models while Autopilot controls residency.",
+            discussion: "Without active control or an explicit pause, the saved idle policy applies after any accepted change finishes.")
         @OptionGroup var configOptions: ConfigOptions
         @Argument var models: [String]
         mutating func run() async throws {

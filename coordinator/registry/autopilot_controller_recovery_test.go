@@ -3,6 +3,7 @@ package registry
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"slices"
 	"testing"
@@ -197,7 +198,7 @@ func TestAutopilotControllerFailedHeartbeatUsesReservedBackoff(t *testing.T) {
 	p.mu.Lock()
 	p.capacitySeq = 11
 	p.BackendCapacity = autopilotControllerCapacity(11)
-	reg.reconcileAutopilotHeartbeatLocked(p, state, now.Add(time.Second))
+	reg.reconcileAutopilotHeartbeatLocked(p, state, p.BackendCapacity, now.Add(time.Second))
 	pending, until := p.autopilotPending, p.autopilotBackoffUntil
 	p.mu.Unlock()
 	if pending != nil || !until.Equal(now.Add(time.Second+7*time.Minute)) {
@@ -205,7 +206,7 @@ func TestAutopilotControllerFailedHeartbeatUsesReservedBackoff(t *testing.T) {
 	}
 }
 
-func TestAutopilotControllerFutureUsesOccupancyOnlyCoResidentWork(t *testing.T) {
+func TestAutopilotControllerFutureIncludesPublicInflightCoResidentWork(t *testing.T) {
 	reg, c, now := newAutopilotControllerTest(t, false)
 	p := autopilotControllerProvider(t, reg, "pending", now, autopilotTestDonor)
 	busy := autopilotControllerProvider(t, reg, "busy-donor", now, autopilotTestDonor)
@@ -217,6 +218,10 @@ func TestAutopilotControllerFutureUsesOccupancyOnlyCoResidentWork(t *testing.T) 
 	p.mu.Unlock()
 	busy.mu.Lock()
 	busy.BackendCapacity.Slots[0].NumRunning = 8
+	for i := range 8 {
+		request := autopilotActiveRequest(fmt.Sprint(i), autopilotTestDonor, now)
+		busy.pendingReqs[request.RequestID] = request
+	}
 	busy.mu.Unlock()
 	f := reg.autopilotFleetSnapshot(c, now)
 	coverage := autopilotCoverage(f)
@@ -230,7 +235,7 @@ func TestAutopilotControllerFutureUsesOccupancyOnlyCoResidentWork(t *testing.T) 
 		t.Fatalf("runtime lost exact future serving set: %+v", pending.FutureResidents)
 	}
 	naive := autopilot.NodeContribution(pending, pending.FutureResidents, f.Demand)
-	if coverage.Future[autopilotTestDonor] <= 0 || autopilotModelRate(coverage.Future, autopilotTestTarget) >= autopilotModelRate(naive, autopilotTestTarget) {
+	if autopilotModelRate(coverage.Future, autopilotTestDonor) <= 0 || autopilotModelRate(coverage.Future, autopilotTestTarget) >= autopilotModelRate(naive, autopilotTestTarget) {
 		t.Fatalf("pending target was overcredited by ignoring unfinished co-resident work: future=%+v raw-demand-only=%+v", coverage.Future, naive)
 	}
 }

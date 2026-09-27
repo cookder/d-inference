@@ -60,7 +60,8 @@ type DemandTracker struct {
 	models map[string]*autopilotModelDemand
 }
 type DemandView struct {
-	Queued int // ephemeral qualified queue occupancy, never an arrival count
+	InFlight int // current qualified public reservations, not logical arrivals
+	Queued   int // ephemeral qualified queue occupancy, never an arrival count
 	Requirements
 	DeadlineKnown                                     bool
 	DeadlineSeconds                                   float64
@@ -73,14 +74,15 @@ type DemandView struct {
 	LastDemand                                        time.Time
 }
 
-func validDemandEnvelope(s DemandSample) bool {
+// ValidEnvelope checks the bounded, content-free metadata used by all demand sources.
+func (s DemandSample) ValidEnvelope() bool {
 	return s.Requirements.valid() && s.Model != "" && len(s.Model) <= 256 &&
 		s.PromptTokens > 0 && s.PromptTokens <= autopilotDemandMaxTokens &&
 		s.RequestedMaxTokens >= 0 && s.RequestedMaxTokens <= autopilotDemandMaxTokens
 }
 
 func (d *DemandTracker) Record(s DemandSample, now time.Time, window time.Duration) {
-	if !validDemandEnvelope(s) || window <= 0 || window > autopilotDemandMaxWindow || now.IsZero() {
+	if !s.ValidEnvelope() || window <= 0 || window > autopilotDemandMaxWindow || now.IsZero() {
 		return
 	}
 	// Intrinsically invalid work and scheduler lock exhaustion are not demand

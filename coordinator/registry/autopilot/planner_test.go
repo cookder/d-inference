@@ -94,10 +94,10 @@ func TestAutopilotPlannerSharedGPUDoesNotSumIndependentThroughputs(t *testing.T)
 	}
 }
 
-func TestAutopilotPlannerOccupancyIsMaximumAndIncludesNewModels(t *testing.T) {
+func TestAutopilotPlannerPublicInflightIsMaximumAndIncludesNewModels(t *testing.T) {
 	n := autopilotPlannerNode("new-capacity")
 	n.Fits["new"] = autopilotPlannerFit(.7, 10)
-	f := Fleet{Nodes: []Node{n}, Occupancy: map[string]int{"new": 20}}
+	f := Fleet{Nodes: []Node{n}, Demand: map[string]DemandView{"new": {InFlight: 20, ServiceSeconds: 10}}}
 	c := Coverage(f)
 	if c.Need["new"] != 2 || c.Workload["new"].Rate != 2 {
 		t.Fatalf("unfinished requests disappeared before first terminal: %+v", c)
@@ -105,11 +105,11 @@ func TestAutopilotPlannerOccupancyIsMaximumAndIncludesNewModels(t *testing.T) {
 	if a := Plan(f, DefaultConfig(), autopilotDemandTestClock()); a == nil || a.Load != "new" {
 		t.Fatalf("occupancy-only model was omitted from planning: %+v", a)
 	}
-	f.Demand = map[string]DemandView{"new": {Rate: 1, ServiceSeconds: 10}}
+	f.Demand = map[string]DemandView{"new": {Rate: 1, InFlight: 20, ServiceSeconds: 10}}
 	if got := Coverage(f).Need["new"]; got != 2 {
 		t.Fatalf("overlapping workload was added twice: %g", got)
 	}
-	f.Demand["new"] = DemandView{Rate: 3, ServiceSeconds: 10}
+	f.Demand["new"] = DemandView{Rate: 3, InFlight: 20, ServiceSeconds: 10}
 	if got := Coverage(f).Need["new"]; got != 3 {
 		t.Fatalf("max lost the larger offered rate: %g", got)
 	}

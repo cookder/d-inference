@@ -10,7 +10,7 @@ import (
 func TestAutopilotQueueExcludesRestrictedCancelledAndExpiredWork(t *testing.T) {
 	q := NewRequestQueue(32, time.Minute)
 	now := time.Now()
-	for _, kind := range []string{"public", "self", "prefer", "serial", "excluded", "nil", "cancelled", "stale", "deadline"} {
+	for _, kind := range []string{"public", "self", "prefer", "serial", "excluded", "nil", "cancelled", "profile cancelled", "stale", "deadline"} {
 		p := &PendingRequest{Model: autopilotTestTarget, EstimatedPromptTokens: 100, RequestedMaxTokens: 64,
 			RequiresVision: true, Traits: RequestTraits{HasTools: true, RequiresNativeMediaTools: true, ToolChoiceMode: "none", MinPrefixCacheProtocol: 1},
 			FirstContentDeadline: now.Add(30 * time.Second)}
@@ -25,6 +25,9 @@ func TestAutopilotQueueExcludesRestrictedCancelledAndExpiredWork(t *testing.T) {
 			p.ExcludedProviderIDs = []string{"restricted"}
 		case "nil":
 			p = nil
+		case "profile cancelled":
+			p.Profile = autopilotActiveRequest("cancelled", p.Model, now).Profile
+			p.Profile.Parent().ClientGoneUS.Store(1)
 		case "deadline":
 			p.FirstContentDeadline = now.Add(-time.Second)
 		}
@@ -39,7 +42,7 @@ func TestAutopilotQueueExcludesRestrictedCancelledAndExpiredWork(t *testing.T) {
 			queued.EnqueuedAt = now.Add(-2 * time.Minute)
 		}
 	}
-	samples := q.autopilotSamples(now)
+	samples := q.autopilotSamples(now, nil)
 	if len(samples) != 1 {
 		t.Fatalf("qualified queue count=%d", len(samples))
 	}
