@@ -1,6 +1,6 @@
 # Scheduling: queues, slots, capacity and the warm pool
 
-> Last updated: 2026-09-26 · commit `8a1b36f70`
+> Last updated: 2026-09-26 · commit `f99e56eb0`
 
 Scheduling is the coordinator's model of *how much work the fleet can take
 and where the weights are*: the per-model request queue, the per-slot state
@@ -622,3 +622,13 @@ completion signals the dispatcher immediately. Due-row pages start at
 `min(limit, verificationDuePageHint)` with `verificationDuePageHint = 256`
 and grow to the requested limit (`coordinator/store/postgres.go`,
 `ListDueVerificationJobsPage`); the initial allocation does not truncate a page.
+
+## Experimental selected-model residency
+
+`coordinator/registry/autopilot_planner.go` (`planAutopilotAction`) adds guarded
+capacity moves for explicitly enrolled providers. The controller splits logical
+work by request shape, prefers positive-benefit additions, protects all donor
+contributions during whole-device transitions, and revalidates at reservation.
+Active/paused providers accept network work only on confirmed residents; waiting
+consent retains ordinary policy. See [Autopilot](model-autopilot.md) for the
+session/selection lease, floors, quiet unloading and recovery invariants.

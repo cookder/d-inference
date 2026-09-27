@@ -8,16 +8,17 @@ import (
 	"time"
 
 	"github.com/eigeninference/d-inference/coordinator/protocol"
+	"github.com/eigeninference/d-inference/coordinator/store"
 	"github.com/google/uuid"
 )
 
 func (r *Registry) reserveAutopilotAction(c *modelAutopilotController, a autopilotAction, now time.Time) (protocol.ModelAutopilotMessage, bool) {
 	// Demand is leaf-locked independently. It may increase after planning, so
 	// re-evaluate donor coverage and benefit using a current observation.
-	demand := c.demand.snapshot(now, c.config.DemandWindow)
+	demand := c.demand.shapeSnapshot(now, c.config.DemandWindow)
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.autopilot != c || !c.config.Enabled || c.config.ObserveOnly {
+	if r.autopilot != c || !c.config.Enabled || c.config.ObserveOnly || c.paused.Load() {
 		return protocol.ModelAutopilotMessage{}, false
 	}
 	// Exclusive registry lock prevents new admissions and binds all existing
@@ -53,7 +54,7 @@ func (r *Registry) reserveAutopilotAction(c *modelAutopilotController, a autopil
 	if fresh == nil || fresh.Load != a.Load || !slices.Equal(sortedAutopilotStrings(fresh.Unload), sortedAutopilotStrings(a.Unload)) {
 		return protocol.ModelAutopilotMessage{}, false
 	}
-	cmd := protocol.ModelAutopilotMessage{Type: protocol.TypeModelAutopilot, CommandID: uuid.NewString(), LoadModelID: fresh.Load, UnloadModelIDs: append([]string{}, fresh.Unload...), ExpectedResidentModels: autopilotResidentIDs(node.State), ExpiresAtMS: now.Add(c.config.CommandAcceptTimeout).UnixMilli(), LeaseSeconds: int(c.config.MinDwell.Seconds())}
+	cmd := protocol.ModelAutopilotMessage{Reason: fresh.Reason, Type: protocol.TypeModelAutopilot, SessionID: node.ID, Revision: node.State.Revision, CommandID: uuid.NewString(), LoadModelID: fresh.Load, UnloadModelIDs: append([]string{}, fresh.Unload...), ExpectedResidentModels: autopilotResidentIDs(node.State), ExpiresAtMS: now.Add(c.config.CommandAcceptTimeout).UnixMilli(), LeaseSeconds: int(c.config.MinDwell.Seconds())}
 	p := node.Session
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -77,7 +78,7 @@ func (r *Registry) sendAutopilotCommand(p *Provider, command protocol.ModelAutop
 		body, err = json.Marshal(command)
 		if err == nil {
 			ctx, cancel := context.WithTimeout(context.Background(), providerControlWriteTimeout)
-			err = p.WriteText(ctx, body)
+			err = p.WriteTextControl(ctx, body)
 			cancel()
 		}
 	}
@@ -119,6 +120,9 @@ func (r *Registry) HandleAutopilotStatus(providerID string, session *Provider, m
 	if (p.autopilotPending.Status == protocol.LoadModelStatusSucceeded || p.autopilotPending.Status == protocol.LoadModelStatusFailed) && msg.Status != p.autopilotPending.Status {
 		return false
 	}
+	if p.autopilotPending.Status != msg.Status && msg.Status == protocol.LoadModelStatusStarted {
+		r.queueAutopilotEvent(store.AutopilotRecord{CommandID: msg.CommandID, At: time.Now(), ProviderID: p.ID, Phase: "started", Load: p.autopilotPending.Command.LoadModelID})
+	}
 	p.autopilotPending.Status = msg.Status
 	return true
 }
@@ -131,6 +135,9 @@ func (r *Registry) markAutopilotWatchdogs(cfg AutopilotConfig, now time.Time) {
 		if pending := p.autopilotPending; pending != nil && now.Sub(pending.SentAt) > cfg.CommandWatchdog {
 			if !pending.Uncertain && r.logger != nil {
 				r.logger.Warn("model autopilot command watchdog", "provider_id", p.ID, "command_id", pending.Command.CommandID, "age", now.Sub(pending.SentAt))
+			}
+			if !pending.Uncertain {
+				r.queueAutopilotEvent(store.AutopilotRecord{CommandID: pending.Command.CommandID, At: now, ProviderID: p.ID, Phase: "uncertain", Load: pending.Command.LoadModelID})
 			}
 			pending.Uncertain = true
 		}

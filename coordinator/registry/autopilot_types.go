@@ -2,12 +2,14 @@ package registry
 
 import (
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/eigeninference/d-inference/coordinator/protocol"
 )
 
 type modelAutopilotController struct {
+	paused      atomic.Bool
 	registry    *Registry
 	config      AutopilotConfig // immutable after construction
 	demand      autopilotDemandTracker
@@ -58,16 +60,19 @@ type autopilotFleet struct {
 	Excluded      map[string]int
 }
 type autopilotAction struct {
-	Node    autopilotNode
-	Load    string
-	Unload  []string
-	Benefit float64
-	Future  map[string]float64
+	Workload string
+	Reason   string
+	Node     autopilotNode
+	Load     string
+	Unload   []string
+	Benefit  float64
+	Future   map[string]float64
 }
 
 // Summaries expose bounded model-level diagnostic counts, never identities or
 // request content. The startup flags and these observations support shadow runs.
 type AutopilotModelSummary struct {
+	Shape           string  `json:"shape,omitempty"`
 	Model           string  `json:"model"`
 	LogicalRequests int     `json:"logical_requests"`
 	OfferedRPS      float64 `json:"offered_rps"`
@@ -79,6 +84,9 @@ type AutopilotModelSummary struct {
 	DeficitRPS      float64 `json:"deficit_rps"`
 }
 type AutopilotSummary struct {
+	Enabled     bool                    `json:"enabled"`
+	Running     bool                    `json:"running"`
+	Paused      bool                    `json:"paused"`
 	At          time.Time               `json:"at"`
 	ObserveOnly bool                    `json:"observe_only"`
 	OptedIn     int                     `json:"opted_in"`

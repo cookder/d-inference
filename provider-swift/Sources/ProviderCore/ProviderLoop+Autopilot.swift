@@ -2,16 +2,19 @@ import Foundation
 
 extension ProviderLoop {
     var modelAutopilotEnabled: Bool {
-        loopConfig.config.backend.modelAutopilot.enabled && !loopConfig.config.coordinator.privateOnly
+        guard autopilotConsented, !autopilotSettings.paused, let control = autopilotControl else { return false }
+        return control.enabled && control.revision == autopilotSettings.revision
+            && control.expiresAtMs > Int64(Date().timeIntervalSince1970 * 1_000)
     }
 
     var autopilotPinnedModels: Set<String> {
-        var pins = Set(loopConfig.config.backend.modelAutopilot.pinnedModels)
+        var pins = Set(autopilotSettings.pinnedModels)
         if let model = loopConfig.config.backend.model, !model.isEmpty { pins.insert(model) }
         return pins
     }
 
     func publishModelAutopilotSnapshot() {
+        loadAutopilotTimingHistory()
         let now = ContinuousClock.now
         autopilotResidentSince = autopilotResidentSince.filter { modelSlots[$0.key] != nil }
         autopilotLeaseUntil = autopilotLeaseUntil.filter { modelSlots[$0.key] != nil }
@@ -19,8 +22,8 @@ extension ProviderLoop {
             autopilotResidentSince[id] = now
         }
         state.modelAutopilot = ModelAutopilotSnapshot(
-            enabled: modelAutopilotEnabled,
-            minDwellSeconds: loopConfig.config.backend.modelAutopilot.effectiveMinDwellSeconds,
+            enabled: autopilotConsented,
+            minDwellSeconds: autopilotSettings.effectiveMinDwellSeconds,
             pinnedModels: autopilotPinnedModels.sorted(), maxModelSlots: maxModelSlots,
             residentModels: modelSlots.keys.sorted().map { id in
                 ModelAutopilotResident(modelId: id,
@@ -33,6 +36,16 @@ extension ProviderLoop {
             freeForLoadNoEvictGb: autopilotCommand == nil ? autopilotFreeNoEvictGb : nil,
             activeCommandId: autopilotCommand?.commandId,
             lastCommandId: autopilotLastCommandId, lastCommandStatus: autopilotLastCommandStatus)
+        state.modelAutopilot?.active = modelAutopilotEnabled
+        state.modelAutopilot?.paused = autopilotSettings.paused
+        state.modelAutopilot?.sessionId = autopilotControl?.sessionId
+        state.modelAutopilot?.revision = autopilotSettings.revision
+        state.modelAutopilot?.selectedModels = autopilotSettings.selectedModels
+        state.modelAutopilot?.minIdleSeconds = autopilotSettings.effectiveMinIdleSeconds
+        state.modelAutopilot?.loadHistory = autopilotTimingHistory.loads
+        state.modelAutopilot?.lastElapsedMs = autopilotLastElapsedMs
+        state.modelAutopilot?.lastReleaseMs = autopilotLastReleaseMs
+        state.modelAutopilot?.lastLoadMs = autopilotLastLoadMs
     }
 
     private static func autopilotSeconds(_ duration: Duration) -> Int {
@@ -41,7 +54,7 @@ extension ProviderLoop {
 
     func checkAutopilotLoadOwnership(_ commandId: String?) throws {
         if let command = autopilotCommand {
-            guard !isShuttingDown, !isDrainingForUpdate else {
+            guard !isShuttingDown, !isDraining else {
                 throw InferenceError.modelLoadFailed("provider_draining")
             }
             guard commandId == command.commandId else {
@@ -55,9 +68,14 @@ extension ProviderLoop {
         }
     }
 
+    private static func autopilotMilliseconds(_ duration: Duration) -> Int64 {
+        max(0, duration.components.seconds * 1000 + duration.components.attoseconds / 1_000_000_000_000_000)
+    }
+
     private static var autopilotNowMs: Int64 { Int64(Date().timeIntervalSince1970 * 1_000) }
 
     func handleModelAutopilot(_ command: ModelAutopilotCommand, send: SendHandle) {
+        refreshAutopilotSettings()
         publishModelAutopilotSnapshot()
         if let previous = autopilotHistory[command.commandId] {
             let matches = previous.0 == command
@@ -72,6 +90,7 @@ extension ProviderLoop {
             return
         }
         if let rejection = autopilotRejection(command) {
+            autopilotLastElapsedMs = 0; autopilotLastReleaseMs = 0; autopilotLastLoadMs = 0
             finishModelAutopilot(command, status: .failed, error: rejection, send: send)
             return
         }
@@ -91,9 +110,10 @@ extension ProviderLoop {
     }
 
     private func autopilotRejection(_ command: ModelAutopilotCommand) -> String? {
+        refreshAutopilotSettings()
         publishModelAutopilotSnapshot()
         guard let snapshot = state.modelAutopilot else { return "not_opted_in" }
-        let busy = isShuttingDown || isDrainingForUpdate || isReconnectingAfterRetirement || hasInflightWork || isLoadingAny || isReslicing
+        let busy = modelSwitchTask != nil || modelAdvertisementsInFlight > 0 || isShuttingDown || isDraining || isReconnectingAfterRetirement || hasInflightWork || isLoadingAny || isReslicing
             || !modelsLoading.isEmpty || !modelsUnloading.isEmpty || !retiringModels.isEmpty
             || startupPreloadTask != nil || !preloadTasks.isEmpty
             || !pendingAdvertise.isEmpty || mtpStagingReservations.hasRetainedTargets
@@ -112,27 +132,13 @@ extension ProviderLoop {
         return nil
     }
 
-    func validateAutopilotAssistant(_ preparation: SpecDecPreparation) throws {
-        guard preparation.status.configured, preparation.artifact == nil else { return }
-        switch preparation.status.reason {
-        case .configDisabled, .killSwitchDisabled, .targetUnsupported: return
-        default: throw AutopilotFailure("assistant_not_cached_or_invalid")
-        }
-    }
-
     private func runModelAutopilot(_ command: ModelAutopilotCommand, send: SendHandle) async {
+        let operationStart = ContinuousClock.now
+        autopilotLastReleaseMs = 0; autopilotLastLoadMs = 0
         do {
             await updateAggregateCapacity()
-            // Resolve only VERIFIED LOCAL assistant artifacts before victims.
-            // Optional MTP must not add unplanned downloads or memory costs.
-            var assistantBytes: UInt64 = 0
-            if let target = command.loadModelId, modelSlots[target] == nil,
-               let info = advertisedModels[target], let path = ModelScanner.resolveLocalPath(modelID: target) {
-                let preparation = await specDecPreparation(modelId: target, modelInfo: info,
-                    modelDirectory: path, allowDownload: false)
-                try validateAutopilotAssistant(preparation)
-                assistantBytes = preparation.artifact?.additionalWeightBytes ?? 0
-            }
+            // The loader handles optional cached MTP with target-only fallback;
+            // preflight proves the independently serveable target fits first.
             let available = await availableMemoryGb()
             if let error = autopilotRejection(command) { throw AutopilotFailure(error) }
             // Validate TOTAL victim feasibility before removing even one model.
@@ -147,7 +153,7 @@ extension ProviderLoop {
                 guard ModelLoadAdmission.evictionCanReach(availableGb: available,
                     reclaimableGb: reclaimable,
                     requiredGb: ModelLoadAdmission.requiredToLoadGb(
-                        weightsGb: info.estimatedMemoryGb + Double(assistantBytes) / 1_073_741_824,
+                        weightsGb: info.estimatedMemoryGb,
                         headroomGb: loadHeadroomGb))
                 else { throw AutopilotFailure("insufficient_memory_without_other_victims") }
             }
@@ -155,15 +161,21 @@ extension ProviderLoop {
             // Never abandon ownership halfway through a multi-victim change.
             try checkAutopilotLoadOwnership(command.commandId)
             autopilotMutationStarted = true
-            for victim in command.unloadModelIds {
-                try Task.checkCancellation()
-                try checkAutopilotLoadOwnership(command.commandId)
-                guard !isShuttingDown, !isDrainingForUpdate,
-                      await unloadModel(victim, forEviction: true, autopilotCommandId: command.commandId) else {
-                    throw AutopilotFailure("victim_became_busy")
+            do {
+                let releaseStart = ContinuousClock.now
+                defer { autopilotLastReleaseMs = Self.autopilotMilliseconds(.now - releaseStart) }
+                for victim in command.unloadModelIds {
+                    try Task.checkCancellation()
+                    try checkAutopilotLoadOwnership(command.commandId)
+                    guard !isShuttingDown, !isDraining,
+                          await unloadModel(victim, forEviction: true, autopilotCommandId: command.commandId) else {
+                        throw AutopilotFailure("victim_became_busy")
+                    }
                 }
             }
             if let target = command.loadModelId {
+                let loadStart = ContinuousClock.now
+                defer { autopilotLastLoadMs = Self.autopilotMilliseconds(.now - loadStart) }
                 try Task.checkCancellation()
                 try await ensureModelLoaded(modelId: target, allowEviction: false,
                     autopilotCommandId: command.commandId)
@@ -171,8 +183,10 @@ extension ProviderLoop {
                       advertisedModels[target] != nil else { throw AutopilotFailure("load_did_not_settle") }
                 autopilotLeaseUntil[target] = .now.advanced(by: .seconds(command.leaseSeconds))
             }
+            autopilotLastElapsedMs = Self.autopilotMilliseconds(.now - operationStart)
             finishModelAutopilot(command, status: .succeeded, send: send)
         } catch {
+            autopilotLastElapsedMs = Self.autopilotMilliseconds(.now - operationStart)
             finishModelAutopilot(command, status: .failed, error: error.localizedDescription, send: send)
         }
         // Terminal snapshot is rebuilt WITH backend capacity before the forced
@@ -189,7 +203,8 @@ extension ProviderLoop {
             autopilotCommand = nil
             autopilotMutationStarted = false
             autopilotTask = nil
-            state.refusingNewWork = isShuttingDown || isDrainingForUpdate || isReconnectingAfterRetirement
+            state.refusingNewWork = isShuttingDown || isDraining || isReconnectingAfterRetirement
+            if !autopilotManagesResidency { startIdleMonitor() }
         }
         autopilotHistory[command.commandId] = (command, status, error)
         autopilotHistoryOrder.append(command.commandId)

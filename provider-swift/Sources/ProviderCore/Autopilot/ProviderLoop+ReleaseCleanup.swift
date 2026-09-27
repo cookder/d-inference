@@ -7,11 +7,11 @@ extension ProviderLoop {
     /// takes a still-supported co-resident out of service.
     internal func cleanupAutopilotSupersededModels() async {
         guard modelAutopilotEnabled, autopilotCommand == nil, !isShuttingDown,
-              !isDrainingForUpdate, !isLoadingAny, !isReslicing,
+              !isDraining, !isLoadingAny, !isReslicing,
               engineV2RecoveryInProgress.isEmpty else { return }
         var attempts = 0
         for model in autopilotSupersededModels.sorted() {
-            guard autopilotCommand == nil, !isShuttingDown, !isDrainingForUpdate,
+            guard autopilotCommand == nil, !isShuttingDown, !isDraining,
                   !isLoadingAny, !isReslicing else { return }
             // Advertisement returned (rollback/new release choice), or the
             // slot is already gone: the earlier release no longer owns it.

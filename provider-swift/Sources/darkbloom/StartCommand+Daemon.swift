@@ -23,6 +23,7 @@ extension Start {
         // Offer account linking before the model picker.
         await offerInlineLogin(coordinatorURL: coordinatorURL)
 
+        let enableAutopilot = try resolveAutopilotChoice(config)
         let selectedModelIDs: [String]
 
         if !model.isEmpty {
@@ -42,7 +43,8 @@ extension Start {
                 snapshot: snapshot,
                 config: config,
                 coordinatorURL: coordinatorURL,
-                runtimeCapabilities: runtimeCapabilities
+                runtimeCapabilities: runtimeCapabilities,
+                autopilotSelection: enableAutopilot
             )
         }
 
@@ -51,11 +53,16 @@ extension Start {
             throw ExitCode.failure
         }
 
+        if enableAutopilot {
+            try await verifyAutopilotSelection(selectedModelIDs, snapshot:snapshot,
+                coordinatorURL:coordinatorURL, runtimeCapabilities:runtimeCapabilities)
+        }
+
         // Idle-memory policy: asked on the same interactive path as the model
         // picker (never for --model/--all/relaunch), with the CURRENT policy as
         // the Enter default. `--idle-timeout` already answered it in `run()`.
         var idleMinutes = config.backend.idleTimeoutMins
-        if model.isEmpty, !all, idleTimeout == nil {
+        if !enableAutopilot, model.isEmpty, !all, idleTimeout == nil {
             idleMinutes = try promptIdleUnloadPolicy(
                 current: idleMinutes,
                 selectedModelIDs: selectedModelIDs,
@@ -70,6 +77,8 @@ extension Start {
         })
         defer { replacement.release() }
         try await ServiceDrain.stopDrainedProvider()
+        try saveAutopilotEnrollment(enabled: enableAutopilot, models: selectedModelIDs,
+            configPath: configOptions.config)
         try LaunchAgent.installAndStart(
             coordinatorURL: coordinatorURL,
             models: selectedModelIDs,
@@ -108,7 +117,12 @@ extension Start {
         for id in selectedModelIDs {
             print("    \(id)")
         }
-        print("  Memory:  \(IdleUnloadPolicy.describe(minutes: idleMinutes)) — `darkbloom idle` to change")
+        if enableAutopilot {
+            print("  Autopilot: Experimental — waiting for coordinator activation")
+            print("  Manage: darkbloom autopilot status | pause | disable")
+        } else {
+            print("  Memory:  \(IdleUnloadPolicy.describe(minutes: idleMinutes)) — `darkbloom idle` to change")
+        }
         if localEndpoint {
             let shownURL = "http://\(bind == "0.0.0.0" ? "127.0.0.1" : bind):\(port)/v1"
             print("  Local:   \(shownURL) (unified mode — run `darkbloom local` for the API key)")

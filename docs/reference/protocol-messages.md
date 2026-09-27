@@ -1,6 +1,6 @@
 # Provider ↔ coordinator protocol messages
 
-> Last updated: 2026-09-27 · commit `e8d00933d`
+> Last updated: 2026-09-26 · commit `f99e56eb0`
 
 Every JSON frame on the provider WebSocket (`GET /ws/provider`), with the Go
 type, the Swift type, and the presence rule for each field. Go is the canon
@@ -837,7 +837,7 @@ rejected. Same-ID recovery never extends the original expiration. See
 
 Go `LoadModelMessage` · Swift `LoadModel`. `model_id` (req). Sent only to
 `backend == "mlx-swift"`; the provider replies with `load_model_status`.
-Opted-in autopilot providers block this legacy residency path and use explicit
+Active or explicitly paused Autopilot providers block this legacy residency path and use explicit
 `model_autopilot` commands instead.
 
 ### `prefetch_model`
@@ -907,9 +907,9 @@ support.
 
 | JSON key | Go / Swift | Presence | Meaning |
 |---|---|---|---|
-| `protocol` | `int` / `Int` | req | `1` for this cached-only protocol |
+| `protocol` | `int` / `Int` | req | `2` for explicit selection and session activation |
 | `enabled`, `cached_only` | `bool` / `Bool` | req | Explicit consent and cached-only scope; both must be true for planning |
-| `min_dwell_seconds` | `int` / `Int` | req | Provider minimum residence and idle duration before replacement |
+| `min_dwell_seconds` | `int` / `Int` | req | Provider minimum residence before replacement; inactivity is separate |
 | `pinned_models` | `[]string` / `[String]` | req | Up to256 protected model IDs |
 | `max_model_slots` | `int` / `Int` | req | Valid planning range `1...32` |
 | `resident_models` | `[]ModelAutopilotResident` / `[ModelAutopilotResident]` | req | Unique resident inventory, at most32; must match the paired capacity snapshot |
@@ -955,7 +955,7 @@ Go `UsageInfo` · Swift `UsageInfo`.
 Opted-in providers accept explicit victim lists through `model_autopilot`.
 There is no separate generic unload command. The provider's ordinary idle timer
 is paused while enrolled, and commands cannot fall through to implicit LRU
-victims. Default standalone autopilot unloading is off; load-driven replacement
+victims. Standalone surplus unloading follows the configured quiet window; load-driven replacement
 still requires all dwell, memory, pin and donor protections.
 
 Non-enrolled providers keep their existing idle and legacy model lifecycle.
@@ -982,3 +982,34 @@ backend-capacity heartbeat. See [autopilot architecture](../architecture/model-a
 - [`../architecture/telemetry.md`](../architecture/telemetry.md) — what the coordinator does with heartbeat data
 - [`telemetry-inventory.md`](telemetry-inventory.md) — producer, sink and cadence of every datum
 - [`api-contracts.md#headers`](api-contracts.md#headers) — the `X-Timing` header
+
+## Autopilot activation and diagnostic fields
+
+Go: `coordinator/protocol/model_autopilot.go` (`ModelAutopilotControl`, `ModelAutopilotState`).
+Swift: `provider-swift/Sources/ProviderCore/Protocol/ModelAutopilot.swift`.
+
+`model_autopilot_control` is coordinator → provider and contains `session_id`,
+`revision`, `enabled`, and `expires_at_ms`. It is sent only to protocol-2 explicit
+enrollments. A matching unexpired lease activates control; absent/expired control
+leaves ordinary policy in force unless the user explicitly paused residency.
+
+Each `model_autopilot` command additionally requires the matching `session_id`
+and consent `revision`. A started operation retains ownership until its terminal
+snapshot even when control or consent changes.
+
+| State field | Type | Meaning |
+|---|---|---|
+| `active`, `paused` | boolean | Acknowledged live control and explicit local pause |
+| `session_id`, `revision` | string | Current control connection and approved configuration |
+| `selected_models` | string array | Exact allowed build IDs; never an empty-means-all policy |
+| `min_idle_seconds` | integer | Inactivity guard separate from residence |
+| `load_history` | optional array | At most 64 `{model_id, weight_hash, load_ms, measured_at_ms}` measurements; only recent matching bytes influence estimates |
+| `last_elapsed_ms`, `last_release_ms`, `last_load_ms` | optional integer | Measured last operation phases; no ETA guarantee |
+
+Provider `enabled` is configured consent. It does not itself activate warm-only
+network admission. An operator-only shadow configuration sends neither control
+leases nor residency commands.
+
+Commands may include a closed `reason`: `demand`, `bootstrap`, `protected_floor`,
+or `idle_surplus`. The provider displays it alongside the target and named
+releases in local status; it never accepts free-form reason text as authority.

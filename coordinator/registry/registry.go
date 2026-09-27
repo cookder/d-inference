@@ -24,8 +24,10 @@ import (
 
 // Registry holds all connected providers and provides routing.
 type Registry struct {
-	mu        sync.RWMutex
-	providers map[string]*Provider
+	autopilotEventsMu sync.Mutex
+	autopilotEvents   map[string]store.AutopilotRecord
+	mu                sync.RWMutex
+	providers         map[string]*Provider
 
 	queue *RequestQueue
 	// drainSuppress rate-limits HEARTBEAT-triggered queue drains per model

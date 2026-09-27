@@ -1181,6 +1181,7 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 		fleetSnapshotsProviderIndexDDL,
 	}
 
+	migrations = append(migrations, autopilotDDL)
 	migrations = append(migrations, appAttestShadowDDL, machineInventoryDDL, appAttestArchiveDDL, appAttestEnrollmentDDL, appAttestReceiptDDL)
 	migrations = append(migrations, appAttestRevocationDDL, appAttestBuildDDL, appAttestKeyRotationDDL, modelTokenPromotionDDL)
 	for i, m := range migrations {

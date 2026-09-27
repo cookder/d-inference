@@ -1,6 +1,6 @@
 # Storage
 
-> Last updated: 2026-09-26 · commit `cf7393580`
+> Last updated: 2026-09-26 · commit `77852451d`
 
 What the coordinator persists, through which interface, in which backend, and
 how the schema reaches a fresh database; then what a provider keeps on its own
@@ -362,3 +362,16 @@ KV blocks under a per-model key, not tokens.
 `coordinator/store/model_token_promotions_schema.go` (`modelTokenPromotionDDL`) adds `model_token_promotions`, account/model keyed `model_token_grants`, durable `model_token_reservations`, and provider-account keyed `model_token_provider_carries`. The carry row retains a sub-micro-dollar payout remainder in `[0, 100000000)`; the additive table also works when upgrading an existing promotion schema. Promotion model IDs deliberately do not reference the model registry, allowing pre-launch setup. The promotion row serializes claims, enforces the maximum claim count and validates the user table’s authoritative account creation timestamp. Account/model uniqueness makes duplicate claims idempotent. Grant counters enforce nonnegative usage/reservations and prevent their sum from exceeding the grant. Reservation terminal state prevents duplicate spending, refunds and provider credit. Claim windows do not expire previously issued grants.
 
 `coordinator/store/model_token_settlement_postgres.go` (`SettleModelTokenReservation`) updates grant usage, consumer money, fractional payout carry and provider earnings in one transaction, locking balance rows in account order before the carry row. `coordinator/store/model_token_earnings_postgres.go` (`carryModelTokenEarningPostgres`) updates the remainder; the reservation persists the credited whole-micro-dollar payout so replay returns the original result without accumulating fractions again. The optional backend capability is discovered through `store.As`; grants bypass the user/model read-through caches and no user/model invalidation is needed. Lease recovery is in `coordinator/store/model_token_leases.go` (`ReleaseStaleModelTokenReservations`). Operational details: [model token promotions](../operations/model-token-promotions.md).
+
+## Autopilot operation ledger
+
+`coordinator/store/postgres_autopilot.go` (`autopilotDDL`, `RecordAutopilot`)
+creates `autopilot_events`, keyed by `(command_id, phase)` with an indexed `at`
+timestamp and a bounded typed JSON record. Insert retries are idempotent. The
+ledger stores model/control metadata without prompts or free-form provider
+errors. A command intent is persisted before dispatch; failed writes prevent new
+changes and terminal observations remain queued for retry. Incomplete historical
+phases remain unresolved evidence, not an inferred rollback. Reads use bounded
+windows. Records currently have no automatic deletion; preservation and archive
+policy can be added independently. `MemoryStore` provides equivalent test/dev
+semantics without restart durability. See [Autopilot](model-autopilot.md).

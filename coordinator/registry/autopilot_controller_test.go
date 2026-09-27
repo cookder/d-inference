@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/eigeninference/d-inference/coordinator/protocol"
+	"github.com/eigeninference/d-inference/coordinator/store"
 )
 
 const (
@@ -21,6 +22,7 @@ const (
 func newAutopilotControllerTest(t *testing.T, observe bool) (*Registry, *modelAutopilotController, time.Time) {
 	t.Helper()
 	reg := New(testLogger())
+	reg.SetStore(store.NewMemory(store.Config{}))
 	reg.SetModelCatalog([]CatalogEntry{{ID: autopilotTestTarget, SizeGB: 8, MinRAMGB: 16}, {ID: autopilotTestDonor, SizeGB: 8, MinRAMGB: 16}})
 	warmCfg := testWarmPoolConfig()
 	warmCfg.MinWarmByModel = map[string]int{autopilotTestTarget: 1}
@@ -45,6 +47,9 @@ func autopilotControllerProvider(t *testing.T, reg *Registry, id string, now tim
 	p.capacitySamplesAt = now
 	p.BackendCapacity = autopilotControllerCapacity(10, residents...)
 	p.ModelAutopilot = autopilotControllerState(residents...)
+	p.ModelAutopilot.SessionID = id
+	p.autopilotControlRevision = "test"
+	p.autopilotControlUntil = now.Add(time.Hour)
 	p.WarmModels = append([]string{}, residents...)
 	p.mu.Unlock()
 	return p
@@ -52,7 +57,7 @@ func autopilotControllerProvider(t *testing.T, reg *Registry, id string, now tim
 
 func autopilotControllerState(residents ...string) *protocol.ModelAutopilotState {
 	free := 48.0
-	s := &protocol.ModelAutopilotState{Protocol: 1, Enabled: true, CachedOnly: true, MaxModelSlots: 3, MinDwellSeconds: 60, FreeForLoadNoEvictGB: &free, ResidentModels: []protocol.ModelAutopilotResident{}, PinnedModels: []string{}}
+	s := &protocol.ModelAutopilotState{Protocol: protocol.ModelAutopilotProtocol, Active: true, SessionID: "provider", Revision: "test", SelectedModels: []string{autopilotTestTarget, autopilotTestDonor}, MinIdleSeconds: 60, Enabled: true, CachedOnly: true, MaxModelSlots: 3, MinDwellSeconds: 60, FreeForLoadNoEvictGB: &free, ResidentModels: []protocol.ModelAutopilotResident{}, PinnedModels: []string{}}
 	for _, m := range residents {
 		resident := 8.0
 		s.ResidentModels = append(s.ResidentModels, protocol.ModelAutopilotResident{ModelID: m, ResidentSeconds: 7200, IdleSeconds: 7200, WeightsGB: 9, ResidentGB: &resident})

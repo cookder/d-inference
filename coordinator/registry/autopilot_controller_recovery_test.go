@@ -234,7 +234,17 @@ func TestAutopilotControllerFutureUsesOccupancyOnlyCoResidentWork(t *testing.T) 
 		t.Fatalf("runtime lost exact future serving set: %+v", pending.FutureResidents)
 	}
 	naive := autopilotNodeContribution(pending, pending.FutureResidents, f.Demand)
-	if coverage.Future[autopilotTestDonor] <= 0 || coverage.Future[autopilotTestTarget] >= naive[autopilotTestTarget] {
+	if coverage.Future[autopilotTestDonor] <= 0 || autopilotModelRate(coverage.Future, autopilotTestTarget) >= autopilotModelRate(naive, autopilotTestTarget) {
 		t.Fatalf("pending target was overcredited by ignoring unfinished co-resident work: future=%+v raw-demand-only=%+v", coverage.Future, naive)
 	}
+}
+
+func autopilotModelRate(rates map[string]float64, model string) float64 {
+	var total float64
+	for key, rate := range rates {
+		if autopilotModel(key) == model {
+			total += rate
+		}
+	}
+	return total
 }

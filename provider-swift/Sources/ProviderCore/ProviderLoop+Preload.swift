@@ -27,7 +27,7 @@ extension ProviderLoop {
     /// `succeeded` -- the coordinator can use this as an idempotent
     /// "ensure warm" call.
     internal func handleLoadModelRequest(modelId: String, send: SendHandle) {
-        if modelAutopilotEnabled {
+        if autopilotManagesResidency {
             send.send(.loadModelStatus(modelId: modelId, status: .failed,
                 error: "model_autopilot_requires_explicit_command"))
             return

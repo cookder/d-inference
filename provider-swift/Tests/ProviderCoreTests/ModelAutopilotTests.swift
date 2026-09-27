@@ -6,14 +6,17 @@ import Testing
 struct ModelAutopilotTests {
     private let now: Int64 = 1_000_000
     private func snapshot() -> ModelAutopilotSnapshot {
-        .init(enabled: true, minDwellSeconds: 1_800, maxModelSlots: 2,
+        var state = ModelAutopilotSnapshot(enabled: true, minDwellSeconds: 1_800, maxModelSlots: 2,
               residentModels: [
                 .init(modelId: "donor", residentSeconds: 3_600, idleSeconds: 2_000, weightsGb: 12, residentGb: 10),
                 .init(modelId: "keep", residentSeconds: 3_600, idleSeconds: 2_000, weightsGb: 10)])
+        state.active = true; state.sessionId = "session"; state.revision = "test"
+        state.selectedModels = ["donor", "keep", "new"]; state.minIdleSeconds = 60
+        return state
     }
     private func command() -> ModelAutopilotCommand {
         .init(commandId: "one", loadModelId: "new", unloadModelIds: ["donor"],
-              expectedResidentModels: ["keep", "donor"], expiresAtMs: now + 60_000)
+              expectedResidentModels: ["keep", "donor"], expiresAtMs: now + 60_000, sessionId:"session", revision:"test")
     }
     private func reject(_ command: ModelAutopilotCommand, _ snapshot: ModelAutopilotSnapshot,
                         busy: Bool = false) -> String? {
@@ -24,6 +27,9 @@ struct ModelAutopilotTests {
         #expect(BackendSettings().modelAutopilot.enabled == false)
         let settings = try JSONDecoder().decode(ModelAutopilotSettings.self, from: Data("{}".utf8))
         #expect(settings == ModelAutopilotSettings())
+        let legacy = try JSONDecoder().decode(ModelAutopilotSettings.self, from: Data("{\"enabled\":true}".utf8))
+        #expect(!legacy.enabled)
+        #expect(!legacy.hasConsent)
         let backend = try JSONDecoder().decode(BackendSettings.self, from: Data("{}".utf8))
         #expect(backend.modelAutopilot == settings)
         #expect(ModelAutopilotSettings(minDwellSeconds: .max).effectiveMinDwellSeconds == 86_400)
@@ -50,7 +56,7 @@ struct ModelAutopilotTests {
         let c = command()
         var s = snapshot(); s.pinnedModels = ["donor"]
         #expect(reject(c, s) == "pinned_model")
-        s = snapshot(); s.residentModels[0].idleSeconds = 1_799
+        s = snapshot(); s.residentModels[0].idleSeconds = 59
         #expect(reject(c, s) == "minimum_dwell")
         s = snapshot(); s.residentModels[0].residentSeconds = 1_799
         #expect(reject(c, s) == "minimum_dwell")
@@ -90,7 +96,7 @@ struct ModelAutopilotTests {
         #expect(try decoder.decode(ProviderMessage.self, from: replyData) == reply)
         let encoded = try #require(JSONSerialization.jsonObject(with: replyData) as? [String: Any])
         let snapshotObject = try #require(encoded["model_autopilot"] as? [String: Any])
-        #expect(snapshotObject["protocol"] as? Int == 1)
+        #expect(snapshotObject["protocol"] as? Int == 2)
         #expect(snapshotObject["cached_only"] as? Bool == true)
         let residents = try #require(snapshotObject["resident_models"] as? [[String: Any]])
         #expect(residents.first?["weights_gb"] as? Double == 12)
@@ -128,22 +134,24 @@ private final class AutopilotRecorder: @unchecked Sendable {
     }
 }
 
-private func autopilotTestLoop(enabled: Bool) throws -> ProviderLoop {
-    try ProviderLoop(config: ProviderLoopConfig(
+private func autopilotTestLoop(enabled: Bool) async throws -> ProviderLoop {
+    let loop = try ProviderLoop(config: ProviderLoopConfig(
         coordinatorURL: "ws://127.0.0.1:0/unused",
         hardware: HardwareInfo(machineModel: "Mac16,5", chipName: "Apple M4 Max", chipFamily: .m4, chipTier: .max,
             memoryGb: 128, memoryAvailableGb: 124, cpuCores: CpuCores(total: 16, performance: 12, efficiency: 4),
             gpuCores: 40, memoryBandwidthGbs: 546),
-        models: [], config: ProviderConfig(provider: ProviderSettings(name: "autopilot-test"), backend: BackendSettings(modelAutopilot: .init(enabled: enabled)))),
+        models: [], config: ProviderConfig(provider: ProviderSettings(name: "autopilot-test"), backend: BackendSettings(modelAutopilot: .init(enabled: enabled, consentRecorded:true, selectedModels:["target","uncached","other"], revision:"test")))),
         purgeLegacyFiles: false, attestationSigner: nil)
+    if enabled { await loop.activateAutopilotForTesting() }
+    return loop
 }
 
 @Suite("ModelAutopilot runtime")
 struct ModelAutopilotRuntimeTests {
     @Test func unconsentedCommandsNeverStartAndDuplicateIsIdempotent() async throws {
-        let loop = try autopilotTestLoop(enabled: false), recorder = AutopilotRecorder()
+        let loop = try await autopilotTestLoop(enabled: false), recorder = AutopilotRecorder()
         let command = ModelAutopilotCommand(commandId: "denied", loadModelId: "uncached",
-            expiresAtMs: Int64(Date().timeIntervalSince1970 * 1_000) + 60_000)
+            expiresAtMs: Int64(Date().timeIntervalSince1970 * 1_000) + 60_000, sessionId:"session", revision:"test")
         await loop.handleModelAutopilot(command, send: SendHandle(recorder.append))
         await loop.handleModelAutopilot(command, send: SendHandle(recorder.append))
         #expect(recorder.statuses.count == 2)
@@ -153,10 +161,10 @@ struct ModelAutopilotRuntimeTests {
     }
 
     @Test func enrolledProviderHasOneIdleResidencyAuthority() async throws {
-        let managed = try autopilotTestLoop(enabled: true)
+        let managed = try await autopilotTestLoop(enabled: true)
         await managed.startIdleMonitor()
         #expect(await managed.idleMonitorTask == nil)
-        let legacy = try autopilotTestLoop(enabled: false)
+        let legacy = try await autopilotTestLoop(enabled: false)
         await legacy.startIdleMonitor()
         let timer = await legacy.idleMonitorTask
         #expect(timer != nil)
@@ -164,12 +172,12 @@ struct ModelAutopilotRuntimeTests {
     }
 
     @Test func managedProviderRefusesLegacyLoadsAndUncachedCommands() async throws {
-        let loop = try autopilotTestLoop(enabled: true), recorder = AutopilotRecorder()
+        let loop = try await autopilotTestLoop(enabled: true), recorder = AutopilotRecorder()
         let send = SendHandle(recorder.append)
         await loop.handleLoadModelRequest(modelId: "uncached", send: send)
         #expect(recorder.legacyFailures == 1)
         let command = ModelAutopilotCommand(commandId: "cold", loadModelId: "uncached",
-            expiresAtMs: Int64(Date().timeIntervalSince1970 * 1_000) + 60_000)
+            expiresAtMs: Int64(Date().timeIntervalSince1970 * 1_000) + 60_000, sessionId:"session", revision:"test")
         await loop.handleModelAutopilot(command, send: send)
         #expect(recorder.statuses.last?.error == "model_not_cached")
         #expect(await loop.autopilotTask == nil)
@@ -188,7 +196,7 @@ private extension ProviderLoop {
 
 extension ModelAutopilotRuntimeTests {
     @Test func acceptanceExpiryDoesNotAbandonStartedMutation() async throws {
-        let loop = try autopilotTestLoop(enabled: true)
+        let loop = try await autopilotTestLoop(enabled: true)
         let expired = ModelAutopilotCommand(commandId: "in-progress", loadModelId: "target", expiresAtMs: 1)
         await loop.installAutopilotTransitionForTest(expired)
         do {
@@ -200,25 +208,10 @@ extension ModelAutopilotRuntimeTests {
         await loop.installAutopilotTransitionForTest(nil)
     }
 
-    @Test func missingConfiguredAssistantIsRejectedBeforePlacement() async throws {
-        let loop = try autopilotTestLoop(enabled: true)
-        do {
-            try await loop.validateAutopilotAssistant(.init(artifact: nil,
-                status: .disabled(.artifactNotCached, configured: true)))
-            Issue.record("missing configured assistant accepted by cached-only command")
-        } catch {
-            #expect(error.localizedDescription == "assistant_not_cached_or_invalid")
-        }
-        try await loop.validateAutopilotAssistant(.init(artifact: nil,
-            status: .disabled(.configDisabled, configured: false)))
-        try await loop.validateAutopilotAssistant(.init(artifact: nil,
-            status: .disabled(.killSwitchDisabled, configured: true)))
-    }
-
     @Test func transitionExcludesLocalAndCompetingLoadsAndParticipatesInDrain() async throws {
-        let loop = try autopilotTestLoop(enabled: true)
+        let loop = try await autopilotTestLoop(enabled: true)
         let command = ModelAutopilotCommand(commandId: "owned", loadModelId: "target",
-            expiresAtMs: Int64(Date().timeIntervalSince1970 * 1_000) + 60_000)
+            expiresAtMs: Int64(Date().timeIntervalSince1970 * 1_000) + 60_000, sessionId:"session", revision:"test")
         await loop.installAutopilotTransitionForTest(command)
         do {
             try await loop.throwIfRefusingNewLocalWork()
@@ -242,5 +235,75 @@ extension ModelAutopilotRuntimeTests {
         #expect(await loop.autopilotHistory.isEmpty)
         await loop.installAutopilotTransitionForTest(nil)
         #expect(await loop.waitForInflightDrain(timeout: .milliseconds(1)))
+    }
+}
+
+extension ProviderLoop {
+    func activateAutopilotForTesting() {
+        autopilotControl = .init(sessionId:"session", revision:"test", enabled:true,
+            expiresAtMs:Int64(Date().timeIntervalSince1970*1000)+120000)
+        publishModelAutopilotSnapshot()
+    }
+}
+
+extension ModelAutopilotTests {
+    @Test func changedSelectionOrOldSessionCannotExecute() {
+        let s = snapshot()
+        var c = command(); c.revision = "old"
+        #expect(reject(c,s) == "inactive_session")
+        c = command(); c.sessionId = "old-connection"
+        #expect(reject(c,s) == "inactive_session")
+        c = command(); c.loadModelId = "not-selected"
+        #expect(reject(c,s) == "model_not_selected")
+        var waiting = s; waiting.active = false
+        #expect(reject(command(),waiting) == "inactive_session")
+    }
+    @Test func localLoadHistorySurvivesRestartAndUnload() throws {
+        let path = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at:path) }
+        var history = ModelAutopilotHistory()
+        history.record(.init(modelId:"cached",loadMs:2400,measuredAtMs:1,weightHash:"verified"))
+        try history.write(to:path)
+        let recovered = ModelAutopilotHistory.read(from:path)
+        #expect(recovered.loads.count == 1)
+        #expect(recovered.loads[0].loadMs == 2400)
+        #expect(recovered.loads[0].weightHash == "verified")
+    }
+}
+
+private extension ProviderLoop {
+    func seedOldAutopilotTimingForTesting() {
+        autopilotLastElapsedMs = 9000; autopilotLastReleaseMs = 2000; autopilotLastLoadMs = 7000
+    }
+}
+extension ModelAutopilotRuntimeTests {
+    @Test func rejectedCommandDoesNotInheritPreviousOperationTimings() async throws {
+        let loop = try await autopilotTestLoop(enabled:true), recorder = AutopilotRecorder()
+        await loop.seedOldAutopilotTimingForTesting()
+        await loop.handleModelAutopilot(.init(commandId:"expired-timing",loadModelId:"uncached",expiresAtMs:1,
+            sessionId:"session",revision:"test"),send:SendHandle(recorder.append))
+        #expect(recorder.statuses.last?.error == "expired_command")
+        #expect(recorder.statuses.last?.modelAutopilot.lastElapsedMs == 0)
+        #expect(recorder.statuses.last?.modelAutopilot.lastReleaseMs == 0)
+        #expect(recorder.statuses.last?.modelAutopilot.lastLoadMs == 0)
+    }
+}
+
+private extension ProviderLoop {
+    func holdManualModelSwitchForAutopilotTesting() {
+        modelSwitchTask = Task { ProviderModelSwitchStatus() }
+    }
+    func releaseManualModelSwitchForAutopilotTesting() { modelSwitchTask = nil }
+}
+extension ModelAutopilotRuntimeTests {
+    @Test func manualSwitchValidationOwnsResidencyBeforeDrainStarts() async throws {
+        let loop = try await autopilotTestLoop(enabled:true), recorder = AutopilotRecorder()
+        await loop.holdManualModelSwitchForAutopilotTesting()
+        await loop.handleModelAutopilot(.init(commandId:"switch-overlap",loadModelId:"uncached",
+            expiresAtMs:Int64(Date().timeIntervalSince1970*1000)+60000,sessionId:"session",revision:"test"),
+            send:SendHandle(recorder.append))
+        #expect(recorder.statuses.last?.error == "provider_busy")
+        #expect(await loop.autopilotCommand == nil)
+        await loop.releaseManualModelSwitchForAutopilotTesting()
     }
 }

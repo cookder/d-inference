@@ -324,15 +324,15 @@ See [architecture](../architecture/model-autopilot.md) and
 
 | Variable | Values / type | Default | Effect / source |
 |---|---|---|---|
-| `EIGENINFERENCE_AUTOPILOT_ENABLED` | bool | `false` | Enable demand collection and controller ticks (`autopilotConfigFromEnv`) |
-| `EIGENINFERENCE_AUTOPILOT_OBSERVE_ONLY` | bool | `true` | Compute/log hypothetical plans without reserving, fencing or sending commands (`autopilotConfigFromEnv`; `autopilot_controller.go`, `tick`) |
+| `EIGENINFERENCE_AUTOPILOT_ENABLED` | bool | `true` | Enable demand collection and controller ticks (`autopilotConfigFromEnv`) |
+| `EIGENINFERENCE_AUTOPILOT_OBSERVE_ONLY` | bool | `false` | Compute/log hypothetical plans without reserving, fencing or sending commands (`autopilotConfigFromEnv`; `autopilot_controller.go`, `tick`) |
 | `EIGENINFERENCE_AUTOPILOT_INTERVAL` | Go duration, `1s...1m` | `10s` | Tick cadence (`autopilotConfigFromEnv`, `Check`) |
 | `EIGENINFERENCE_AUTOPILOT_DEMAND_WINDOW` | Go duration, `1m...30m` | `5m` | Arrival-window workload aggregation (`autopilotConfigFromEnv`, `Check`) |
 | `EIGENINFERENCE_AUTOPILOT_MIN_DWELL`, `EIGENINFERENCE_AUTOPILOT_IDLE_UNLOAD_AFTER` | Go durations, dwell `1m...24h`; idle ≥ dwell and ≤ `24h` | `30m`, `1h` | Replacement residence/idle protection and optional standalone quiet window; provider's longer dwell also binds (`autopilotConfigFromEnv`, `Check`) |
-| `EIGENINFERENCE_AUTOPILOT_LOAD_TIME_PRIOR` | Go duration, `1s...5m` | `30s` | Conservative unmeasured load cost; valid slot observations may replace it (`autopilotConfigFromEnv`; `autopilot_snapshot.go`, `autopilotModelFitLocked`) |
+| `EIGENINFERENCE_AUTOPILOT_LOAD_TIME_PRIOR` | Go duration, `1s...5m` | `30s` | Conservative unmeasured load cost; recent exact-build/weight-hash measurements retained after unloading may replace it (`autopilotConfigFromEnv`; `autopilot_snapshot.go`, `autopilotModelFitLocked`) |
 | `EIGENINFERENCE_AUTOPILOT_MAX_ACTIONS_PER_TICK`, `EIGENINFERENCE_AUTOPILOT_MAX_CONCURRENT_OPERATIONS` | ints, `1...32`, `1...64` | `2`, `4` | Per-tick proposals/commands and managed-operation start budget, accounting for currently observed legacy pending loads; legacy controllers retain separate limits (`autopilotConfigFromEnv`; `autopilot_controller.go`, `tick`) |
 | `EIGENINFERENCE_AUTOPILOT_TARGET_UTILIZATION` | float, `0.1...0.9` | `0.7` | Quality-capacity utilization factor (`autopilotConfigFromEnv`; `autopilot_snapshot.go`, `autopilotModelFitLocked`) |
-| `EIGENINFERENCE_AUTOPILOT_ALLOW_IDLE_UNLOAD` | bool | `false` | Allow standalone surplus unloading after quiet/dwell, pins, floors, whole-device-idle and pressure gates (`autopilotConfigFromEnv`; `autopilot_planner.go`, `planAutopilotAction`) |
+| `EIGENINFERENCE_AUTOPILOT_ALLOW_IDLE_UNLOAD` | bool | `true` | Allow standalone surplus unloading after quiet/dwell, pins, floors, whole-device-idle gates (`autopilotConfigFromEnv`; `autopilot_planner.go`, `planAutopilotAction`) |
 
 These implementation defaults have **no environment-variable override** in this
 change; programmatic configuration fields are validated by `AutopilotConfig.Check`.
@@ -752,3 +752,9 @@ These library controls apply to foreground processes and benchmark runs; they ar
 | `MLX_GPTOSS_MXFP4_DECODE_FAST_TAIL` | `1` enables, other explicit values disable | enabled only on physical `applegpu_g16s` | `libs/mlx-swift/Source/Cmlx/mlx/mlx/backend/metal/quantized.cpp` (`gather_qmv`): width-2880 MXFP4 gathered matrix-vector path with a masked 320-element tail. Exact shape/dtype gates retain the general fallback. |
 | `MLX_GPTOSS_MXFP4_PREFILL_TILE` | `m32n32k32`; other values use legacy | legacy | `libs/mlx-swift/Source/Cmlx/mlx/mlx/backend/metal/gptoss_mxfp4_policy.h` (`gptoss_mxfp4_prefill_tile`): optional 32-row tile for matching sorted expert prefill shapes. Small workstation gains do not establish a universal default. |
 | `DARKBLOOM_GPTOSS_COMPILED_EXPERTS` | `1` enables | disabled | `libs/mlx-swift-lm/Libraries/MLXLLM/Models/GPTOSS+CompiledExperts.swift` (`GPTOSSCompiledExpertsPolicy`): compile single-token B=1/2/4 expert graphs for exact 20B shapes. The global `MLX_COMPILED_DECODE=0` rollback still disables this path. Batch-dependent timing is mixed; weights remain live through weak updatable state. |
+
+Provider Autopilot remains **off by default** even though the coordinator accepts
+explicit enrollments. Active control uses a connection/revision lease lasting
+`3 * Interval + 10s`. `POST /v1/admin/autopilot` changes the runtime pause flag;
+it does not change startup configuration. Restart resets that operator pause.
+See `coordinator/registry/autopilot_activation.go` (`SetAutopilotPaused`, `refreshControlLeases`).

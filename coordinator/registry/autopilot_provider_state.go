@@ -6,10 +6,12 @@ import (
 	"time"
 
 	"github.com/eigeninference/d-inference/coordinator/protocol"
+	"github.com/eigeninference/d-inference/coordinator/store"
 )
 
 func providerAutopilotManagedLocked(p *Provider) bool {
-	return p.ModelAutopilot != nil && p.ModelAutopilot.Enabled
+	return providerAutopilotConsentedLocked(p) && (p.ModelAutopilot.Paused || (p.ModelAutopilot.Active &&
+		p.ModelAutopilot.SessionID == p.ID && p.ModelAutopilot.Revision == p.autopilotControlRevision && time.Now().Before(p.autopilotControlUntil)))
 }
 func providerAutopilotTransitionLocked(p *Provider) bool {
 	return p.autopilotPending != nil || (p.ModelAutopilot != nil && p.ModelAutopilot.ActiveCommandID != "")
@@ -21,8 +23,18 @@ func cloneAutopilotState(in *protocol.ModelAutopilotState) *protocol.ModelAutopi
 	}
 	// Keep malformed opt-in/control ownership fail-closed without retaining an
 	// unbounded untrusted report. A later valid heartbeat can replace it.
-	if len(in.ResidentModels) > 32 || len(in.PinnedModels) > 256 || len(in.ActiveCommandID) > 64 || len(in.LastCommandID) > 64 {
+	if len(in.SelectedModels) > 256 || len(in.Revision) > 64 || len(in.SessionID) > 128 || len(in.LoadHistory) > 64 || len(in.ResidentModels) > 32 || len(in.PinnedModels) > 256 || len(in.ActiveCommandID) > 64 || len(in.LastCommandID) > 64 {
 		return &protocol.ModelAutopilotState{Protocol: in.Protocol, Enabled: in.Enabled, ActiveCommandID: "invalid_report"}
+	}
+	for _, id := range in.SelectedModels {
+		if id == "" || len(id) > 256 {
+			return &protocol.ModelAutopilotState{Enabled: in.Enabled, ActiveCommandID: "invalid_report"}
+		}
+	}
+	for _, timing := range in.LoadHistory {
+		if len(timing.ModelID) > 256 || len(timing.WeightHash) > 128 {
+			return &protocol.ModelAutopilotState{Enabled: in.Enabled, ActiveCommandID: "invalid_report"}
+		}
 	}
 	for _, m := range in.ResidentModels {
 		if len(m.ModelID) > 256 {
@@ -35,6 +47,8 @@ func cloneAutopilotState(in *protocol.ModelAutopilotState) *protocol.ModelAutopi
 		}
 	}
 	out := *in
+	out.SelectedModels = append([]string(nil), in.SelectedModels...)
+	out.LoadHistory = append([]protocol.ModelAutopilotLoadTiming(nil), in.LoadHistory...)
 	out.PinnedModels = append([]string(nil), in.PinnedModels...)
 	out.ResidentModels = append([]protocol.ModelAutopilotResident(nil), in.ResidentModels...)
 	if in.FreeForLoadNoEvictGB != nil {
@@ -135,5 +149,11 @@ func (r *Registry) reconcileAutopilotHeartbeatLocked(p *Provider, state *protoco
 		}
 		p.autopilotBackoffUntil = now.Add(backoff)
 	}
+	r.queueAutopilotEvent(store.AutopilotRecord{CommandID: pending.Command.CommandID, At: now, ProviderID: p.ID, Phase: state.LastCommandStatus, Load: pending.Command.LoadModelID, Unload: pending.Command.UnloadModelIDs, Before: pending.Command.ExpectedResidentModels, After: autopilotResidentIDs(state), ElapsedMS: now.Sub(pending.SentAt).Milliseconds(), LoadMS: max(0, min(state.LastLoadMS, 1800000)), ReleaseMS: max(0, min(state.LastReleaseMS, 1800000))})
 	p.autopilotPending = nil
+}
+
+// CloneAutopilotState returns a detached diagnostic snapshot for account views.
+func CloneAutopilotState(state *protocol.ModelAutopilotState) *protocol.ModelAutopilotState {
+	return cloneAutopilotState(state)
 }

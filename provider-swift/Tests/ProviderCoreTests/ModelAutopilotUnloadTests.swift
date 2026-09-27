@@ -47,8 +47,9 @@ struct ModelAutopilotUnloadTests {
                 gpuCores: 40, memoryBandwidthGbs: 546),
             models: ids.map { ModelInfo(id: $0, modelType: "gemma4", sizeBytes: 1024, estimatedMemoryGb: 0.001) },
             config: ProviderConfig(provider: ProviderSettings(name: "autopilot-unload-test"),
-                backend: BackendSettings(modelAutopilot: .init(enabled: true, pinnedModels: pins)))),
+                backend: BackendSettings(modelAutopilot: .init(enabled:true, pinnedModels:pins, consentRecorded:true, selectedModels:ids, revision:"test")))),
             purgeLegacyFiles: false, attestationSigner: nil)
+        await loop.activateAutopilotForTesting()
         await loop.setLoadedModelsPersistenceEnabledForTesting(false)
         let runtime = EngineV2Runtime()
         await loop.setEngineV2RuntimeForTesting(runtime)
@@ -69,7 +70,7 @@ struct ModelAutopilotUnloadTests {
         let recorder = AutopilotUnloadRecorder()
         await loop.handleModelAutopilot(.init(commandId: "unload", unloadModelIds: ["old"],
             expectedResidentModels: ["old", "keep", "local"],
-            expiresAtMs: Int64(Date().timeIntervalSince1970 * 1_000) + 60_000), send: SendHandle(recorder.send))
+            expiresAtMs: Int64(Date().timeIntervalSince1970 * 1_000) + 60_000, sessionId:"session", revision:"test"), send: SendHandle(recorder.send))
         let task = await loop.autopilotTask
         await task?.value
         #expect(recorder.last?.status == .succeeded)

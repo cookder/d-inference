@@ -161,6 +161,8 @@ extension CoordinatorClient {
                 eventContinuation?.yield(.runtimeOutdated(mismatches: status.mismatches))
             }
 
+        case .modelAutopilotControl(let control):
+            eventContinuation?.yield(.modelAutopilotControl(control))
         case .modelAutopilot(let command):
             eventContinuation?.yield(.modelAutopilot(command))
 

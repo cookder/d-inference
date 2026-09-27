@@ -197,10 +197,12 @@ type Provider struct {
 	IdleUnloadMins *int
 
 	// Live backend capacity from heartbeats (nil for providers without capacity reporting)
-	BackendCapacity       *protocol.BackendCapacity
-	ModelAutopilot        *protocol.ModelAutopilotState
-	autopilotPending      *autopilotPendingCommand
-	autopilotBackoffUntil time.Time
+	BackendCapacity          *protocol.BackendCapacity
+	ModelAutopilot           *protocol.ModelAutopilotState
+	autopilotPending         *autopilotPendingCommand
+	autopilotControlUntil    time.Time
+	autopilotControlRevision string
+	autopilotBackoffUntil    time.Time
 
 	// capacitySamplesAt is the coordinator time of the last accepted slot
 	// sample reconciliation. Separate from LastHeartbeat: rejected capacity

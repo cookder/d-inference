@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"slices"
 	"time"
+
+	"github.com/eigeninference/d-inference/coordinator/store"
+	"github.com/google/uuid"
 )
 
 func (r *Registry) ConfigureAutopilot(cfg AutopilotConfig) error {
@@ -55,7 +58,14 @@ func (r *Registry) StartAutopilotController(ctx context.Context, cfg AutopilotCo
 			}
 		}
 	}()
-	return cancel
+	return func() {
+		c.paused.Store(true)
+		c.tickMu.Lock()
+		c.refreshControlLeases(time.Now())
+		c.registry.flushAutopilotEvents()
+		c.tickMu.Unlock()
+		cancel()
+	}
 }
 
 func (r *Registry) TriggerAutopilot() AutopilotSummary {
@@ -75,6 +85,9 @@ func (r *Registry) AutopilotSnapshot() AutopilotSummary {
 		return AutopilotSummary{}
 	}
 	s := r.autopilot.lastSummary
+	s.Paused = r.autopilot.paused.Load()
+	s.Enabled = r.autopilot.config.Enabled
+	s.Running = r.autopilot.running
 	s.Models = append([]AutopilotModelSummary(nil), s.Models...)
 	s.Excluded = map[string]int{}
 	for k, v := range r.autopilot.lastSummary.Excluded {
@@ -87,6 +100,8 @@ func (c *modelAutopilotController) tick(now time.Time) AutopilotSummary {
 	started := time.Now()
 	c.tickMu.Lock()
 	defer c.tickMu.Unlock()
+	ledgerReady := c.registry.flushAutopilotEvents()
+	c.refreshControlLeases(now)
 	if !c.config.ObserveOnly {
 		c.registry.markAutopilotWatchdogs(c.config, now)
 		c.registry.retryAutopilotCommands(now)
@@ -95,6 +110,9 @@ func (c *modelAutopilotController) tick(now time.Time) AutopilotSummary {
 	summary := autopilotSummary(f, c.config, now)
 	remaining := c.config.MaxConcurrentOperations - summary.Pending - f.LegacyPending
 	limit := min(c.config.MaxActionsPerTick, max(0, remaining))
+	if c.paused.Load() || !ledgerReady {
+		limit = 0
+	}
 	for range limit {
 		action := planAutopilotAction(f, c.config, now)
 		if action == nil {
@@ -102,6 +120,7 @@ func (c *modelAutopilotController) tick(now time.Time) AutopilotSummary {
 		}
 		summary.Proposed++
 		if c.config.ObserveOnly {
+			c.registry.queueAutopilotEvent(store.AutopilotRecord{Reason: action.Reason, Shape: autopilotShapeLabel(action.Workload), CommandID: uuid.NewString(), At: now, ProviderID: action.Node.ID, Phase: "proposed", Load: action.Load, Unload: action.Unload, Before: autopilotResidentIDs(action.Node.State), Benefit: action.Benefit})
 			// Hypothetical state stays in this copy. It never reaches routing,
 			// pending maps, donor protection of another controller or telemetry of
 			// actual capacity. Simulate the debit for this pass only.
@@ -124,6 +143,21 @@ func (c *modelAutopilotController) tick(now time.Time) AutopilotSummary {
 		}
 		command, ok := c.registry.reserveAutopilotAction(c, *action, now)
 		if !ok { // State moved since the snapshot. Try again on the next bounded tick.
+			break
+		}
+		action.Node.Session.mu.Lock()
+		pending := action.Node.Session.autopilotPending
+		action.Node.Session.mu.Unlock()
+		if pending == nil {
+			break
+		}
+		if !c.registry.recordAutopilotReservation(*action, pending) {
+			action.Node.Session.mu.Lock()
+			if action.Node.Session.autopilotPending == pending {
+				action.Node.Session.autopilotPending = nil
+			}
+			action.Node.Session.mu.Unlock()
+			c.registry.queueAutopilotEvent(store.AutopilotRecord{CommandID: command.CommandID, At: now, ProviderID: action.Node.ID, Phase: "failed", Load: action.Load})
 			break
 		}
 		summary.Issued++
@@ -170,7 +204,7 @@ func autopilotSummary(f autopilotFleet, cfg AutopilotConfig, now time.Time) Auto
 				eligible++
 			}
 		}
-		s.Models = append(s.Models, AutopilotModelSummary{Model: m, LogicalRequests: f.Demand[m].Requests, OfferedRPS: f.Demand[m].Rate, CapacityRPS: coverage.Ready[m], PendingRPS: coverage.Future[m], ProtectedFloor: autopilotFloor(f, m), WarmProviders: coverage.Warm[m], EligibleIdle: eligible, DeficitRPS: max(0, coverage.Need[m]-coverage.Ready[m]-coverage.Future[m])})
+		s.Models = append(s.Models, AutopilotModelSummary{Model: autopilotModel(m), Shape: autopilotShapeLabel(m), LogicalRequests: f.Demand[m].Requests, OfferedRPS: f.Demand[m].Rate, CapacityRPS: coverage.Ready[m], PendingRPS: coverage.Future[m], ProtectedFloor: autopilotFloor(f, autopilotModel(m)), WarmProviders: coverage.Warm[autopilotModel(m)], EligibleIdle: eligible, DeficitRPS: max(0, coverage.Need[m]-coverage.Ready[m]-coverage.Future[m])})
 	}
 	return s
 }

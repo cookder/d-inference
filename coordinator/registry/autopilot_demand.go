@@ -14,6 +14,8 @@ import (
 // unfinished request: the planner must independently use live occupancy as a
 // lower bound on demand, not add occupancy to this same workload a second time.
 type AutopilotDemandSample struct {
+	DeadlineKnown          bool
+	FirstContentDeadline   time.Duration
 	Model                  string
 	ReceivedAt             time.Time
 	PromptTokens           int
@@ -40,6 +42,8 @@ const (
 var autopilotPromptBounds = [...]int{64, 256, 1024, 4096, 16384, 65536, 262144, autopilotDemandMaxTokens}
 
 type autopilotDemandBucket struct {
+	deadlineKnown                                    bool
+	deadlineSeconds                                  float64
 	at                                               time.Time
 	requests, shed, completed, serviceSamples        int
 	promptSum, requestedOutputSum, observedOutputSum float64
@@ -52,10 +56,15 @@ type autopilotModelDemand struct {
 	buckets     []autopilotDemandBucket // sorted; one entry per ten-second interval
 }
 type autopilotDemandTracker struct {
+	cohort bool
+	shapes map[string]*autopilotDemandTracker
 	mu     sync.Mutex
 	models map[string]*autopilotModelDemand
 }
 type autopilotDemandView struct {
+	DeadlineKnown                                     bool
+	DeadlineSeconds                                   float64
+	Sustained                                         bool
 	Rate                                              float64
 	PromptTokens, TailPromptTokens                    int
 	OutputTokens, RequestedMaxTokens                  int
@@ -138,8 +147,26 @@ func (d *autopilotDemandTracker) record(s AutopilotDemandSample, now time.Time, 
 		copy(m.buckets[i+1:], m.buckets[i:])
 		m.buckets[i] = autopilotDemandBucket{at: at}
 	}
+	if !d.cohort {
+		if d.shapes == nil {
+			d.shapes = make(map[string]*autopilotDemandTracker)
+		}
+		key := autopilotShapeKey(s)
+		tracker := d.shapes[key]
+		if tracker == nil && len(d.shapes) < 2048 {
+			tracker = &autopilotDemandTracker{cohort: true}
+			d.shapes[key] = tracker
+		}
+		if tracker != nil {
+			tracker.record(s, now, window)
+		}
+	}
 	b := &m.buckets[i]
 	b.requests++
+	b.deadlineKnown = b.deadlineKnown || s.DeadlineKnown
+	if seconds := s.FirstContentDeadline.Seconds(); s.DeadlineKnown && seconds > 0 && (b.deadlineSeconds == 0 || seconds < b.deadlineSeconds) {
+		b.deadlineSeconds = seconds
+	}
 	if s.CapacityShed {
 		b.shed++
 	}
@@ -203,10 +230,18 @@ func (d *autopilotDemandTracker) snapshot(now time.Time, window time.Duration) m
 		m.pruneBuckets(now.Add(-window))
 		var sum autopilotDemandBucket
 		fast := 0
+		observedBuckets := 0
 		fastCutoff := now.Add(-time.Minute).Truncate(autopilotDemandBucketWidth)
 		for _, b := range m.buckets {
 			if b.at.After(now) {
 				continue // a backwards clock adjustment must not count future work
+			}
+			if b.requests > 0 {
+				observedBuckets++
+			}
+			sum.deadlineKnown = sum.deadlineKnown || b.deadlineKnown
+			if b.deadlineSeconds > 0 && (sum.deadlineSeconds == 0 || b.deadlineSeconds < sum.deadlineSeconds) {
+				sum.deadlineSeconds = b.deadlineSeconds
 			}
 			sum.requests += b.requests
 			sum.shed += b.shed
@@ -227,6 +262,8 @@ func (d *autopilotDemandTracker) snapshot(now time.Time, window time.Duration) m
 			}
 		}
 		v := autopilotDemandView{
+			DeadlineKnown: sum.deadlineKnown, DeadlineSeconds: sum.deadlineSeconds,
+			Sustained:  observedBuckets >= 3 && sum.requests >= autopilotDemandMinSamples,
 			LastDemand: m.last, Requests: sum.requests, CapacityShed: sum.shed,
 			Completed: sum.completed, ServiceSamples: sum.serviceSamples,
 			RequiresVision: sum.vision, HasTools: sum.tools, RequiresToolConstraint: sum.grammar,

@@ -10,7 +10,7 @@ import (
 )
 
 func (r *Registry) autopilotFleetSnapshot(c *modelAutopilotController, now time.Time) autopilotFleet {
-	demand := c.demand.snapshot(now, c.config.DemandWindow)
+	demand := c.demand.shapeSnapshot(now, c.config.DemandWindow)
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.autopilotFleetSnapshotLocked(c, demand, now)
@@ -20,6 +20,14 @@ func (r *Registry) autopilotFleetSnapshot(c *modelAutopilotController, now time.
 // runs under these locks. Reservation calls this with r.mu exclusive so donor
 // protection is recalculated against current, not stale proposed, placements.
 func (r *Registry) autopilotFleetSnapshotLocked(c *modelAutopilotController, demand map[string]autopilotDemandView, now time.Time) autopilotFleet {
+	byModel := make(map[string]map[string]autopilotDemandView)
+	for key, d := range demand {
+		model := autopilotModel(key)
+		if byModel[model] == nil {
+			byModel[model] = map[string]autopilotDemandView{}
+		}
+		byModel[model][key] = d
+	}
 	f := autopilotFleet{Demand: demand, Floors: map[string]int{}, Occupancy: map[string]int{}, Excluded: map[string]int{}}
 	if r.warmPool != nil {
 		for m, n := range r.warmPool.config.MinWarmByModel {
@@ -33,7 +41,7 @@ func (r *Registry) autopilotFleetSnapshotLocked(c *modelAutopilotController, dem
 	}
 	for _, p := range r.providers {
 		p.mu.Lock()
-		n := autopilotNode{ID: p.ID, Session: p, Seq: p.capacitySeq, Managed: providerAutopilotManagedLocked(p), Pending: providerAutopilotTransitionLocked(p), MemoryPressure: p.SystemMetrics.MemoryPressure, Fits: map[string]autopilotModelFit{}}
+		n := autopilotNode{ID: p.ID, Session: p, Seq: p.capacitySeq, Managed: providerAutopilotManagedLocked(p) || (c.config.ObserveOnly && providerAutopilotConsentedLocked(p) && !p.ModelAutopilot.Paused), Pending: providerAutopilotTransitionLocked(p), MemoryPressure: p.SystemMetrics.MemoryPressure, Fits: map[string]autopilotModelFit{}}
 		n.Uncertain = p.autopilotPending != nil && p.autopilotPending.Uncertain
 		fresh := !p.capacitySamplesAt.IsZero() && now.Sub(p.capacitySamplesAt) <= c.config.MaxSnapshotAge && p.BackendCapacity != nil
 		if !fresh || p.PrivateOnly {
@@ -43,8 +51,8 @@ func (r *Registry) autopilotFleetSnapshotLocked(c *modelAutopilotController, dem
 			continue
 		}
 		n.State = cloneAutopilotState(p.ModelAutopilot)
-		allIdle := p.pendingCount() == 0 && !warmPoolBackendSlotBusyLocked(p)
-		n.Idle = allIdle && !n.Pending && !now.Before(p.autopilotBackoffUntil) && !r.providerHasPendingLoad(p.ID) && p.SystemMetrics.ThermalState != "critical" && p.SystemMetrics.ThermalState != "serious" && p.SystemMetrics.CPUUsage < .9
+		allIdle := !providerDrainingLocked(p, now) && p.pendingCount() == 0 && !warmPoolBackendSlotBusyLocked(p)
+		n.Idle = (p.ModelAutopilot == nil || !p.ModelAutopilot.Paused) && allIdle && !n.Pending && !now.Before(p.autopilotBackoffUntil) && !r.providerHasPendingLoad(p.ID) && p.SystemMetrics.ThermalState != "critical" && p.SystemMetrics.ThermalState != "serious" && p.SystemMetrics.CPUUsage < .9
 		if n.Managed && !autopilotStateMatchesCapacity(p) {
 			n.Idle = false
 			f.Excluded["unreconciled_state"]++
@@ -53,16 +61,29 @@ func (r *Registry) autopilotFleetSnapshotLocked(c *modelAutopilotController, dem
 			f.Occupancy[slot.Model] += max(0, slot.NumRunning) + max(0, slot.NumWaiting)
 		}
 		for _, model := range p.Models {
-			d := demand[model.ID]
-			if !r.providerPassesRoutingGatesLocked(p, model.ID, RequestTraits{HasTools: d.HasTools, RequiresToolConstraint: d.RequiresToolConstraint}, false, now) || (d.RequiresVision && !model.IsVision) {
+			if p.ModelAutopilot != nil && p.ModelAutopilot.Enabled && !providerAutopilotAllowsLocked(p, model.ID) {
 				continue
 			}
-			fit := r.autopilotModelFitLocked(p, model.ID, d, c.config)
-			if fit.Rate <= 0 {
-				f.Excluded["unknown_service"]++
+			// Keep base residency independent of a specialized request shape.
+			// Each cohort earns capacity only from providers qualified for it.
+			if !r.providerPassesRoutingGatesLocked(p, model.ID, RequestTraits{}, false, now) {
 				continue
 			}
-			n.Fits[model.ID] = fit
+			found := false
+			for key, d := range byModel[model.ID] {
+				found = true
+				if !r.providerPassesRoutingGatesLocked(p, model.ID, RequestTraits{HasTools: d.HasTools, RequiresToolConstraint: d.RequiresToolConstraint}, false, now) || (d.RequiresVision && !model.IsVision) {
+					continue
+				}
+				fit := r.autopilotModelFitLocked(p, model.ID, d, c.config)
+				if fit.Rate > 0 {
+					n.Fits[key] = fit
+				}
+			}
+			if !found {
+				n.Fits[model.ID] = r.autopilotModelFitLocked(p, model.ID, autopilotDemandView{}, c.config)
+			}
+
 			for _, slot := range p.BackendCapacity.Slots {
 				if slot.Model == model.ID && (slot.State == "idle" || slot.State == "running") {
 					n.Residents = append(n.Residents, model.ID)
@@ -155,20 +176,42 @@ func (r *Registry) autopilotModelFitLocked(p *Provider, model string, d autopilo
 			break
 		}
 	}
+	if p.ModelAutopilot != nil {
+		hash := ""
+		for _, info := range p.Models {
+			if info.ID == model {
+				hash = info.WeightHash
+				break
+			}
+		}
+		for _, timing := range p.ModelAutopilot.LoadHistory {
+			age := time.Since(time.UnixMilli(timing.MeasuredAtMS))
+			if timing.ModelID == model && hash != "" && timing.WeightHash == hash && timing.LoadMS > 0 && timing.LoadMS <= 1800000 && age >= 0 && age < 7*24*time.Hour {
+				load = math.Max(1, float64(timing.LoadMS)/1000)
+			}
+		}
+	}
 	tail := max(prompt, d.TailPromptTokens)
 	deadline := modelpolicy.CoordinatorFirstContentDeadline(model, tail, 5*time.Second).Seconds()
 	first := float64(tail)/prefill + 1/solo.tps + math.Max(0, p.Reputation.AvgResponseTime.Seconds())
+	if d.DeadlineKnown {
+		deadline = d.DeadlineSeconds
+	}
 	entry := r.modelCatalog[model]
-	weights := math.Max(r.catalogSizeGBLocked(model), advertisedModelSizeGBLocked(p, model)) * 1.2 * 1e9 / (1 << 30)
+	weights := math.Max(r.catalogSizeGBLocked(model), advertisedModelSizeGBLocked(p, model)) * coldLoadCatalogGBToMemGiB
+	offload := advertisedOffloadedMemoryGBLocked(p, model)
+	if finitePositiveMemory(offload) {
+		weights = offload
+	}
 	_, sampleCount := r.tpsRegistry.SoloMedian(model, chipClassKey(p.Hardware))
-	fit := autopilotModelFit{Rate: rate, ServiceSeconds: service, LoadSeconds: load, WeightsGiB: weights, Restricted: len(entry.RequiredProviderCapabilities) > 0, Measured: sampleCount >= qualityCapSoloMinSamples, MeetsDeadline: first <= deadline*.8}
+	fit := autopilotModelFit{Rate: rate, ServiceSeconds: service, LoadSeconds: load, WeightsGiB: weights, Restricted: len(entry.RequiredProviderCapabilities) > 0, Measured: sampleCount >= qualityCapSoloMinSamples, MeetsDeadline: (d.DeadlineKnown && deadline <= 0) || first <= deadline*.8}
 	if !modelFitsHardware(r.catalogMinRAMGbLocked(model), r.catalogSizeGBLocked(model), float64(p.Hardware.MemoryGB)) {
 		fit.MeetsDeadline = false
 	}
 	// Reuse the scheduler's version/model-specific structural KV arithmetic.
 	// It is only an upper-bound prefilter for cold models; a completed load
 	// must still report actual usable budgets before receiving capacity credit.
-	budget := coldTokenBudgetEstimate(float64(p.Hardware.MemoryGB), r.catalogSizeGBLocked(model), 0, p.Version, model)
+	budget := coldTokenBudgetEstimateWithOffload(float64(p.Hardware.MemoryGB), r.catalogSizeGBLocked(model), offload, 0, p.Version, model)
 	for _, slot := range p.BackendCapacity.Slots {
 		if slot.Model == model && (slot.State == "running" || slot.State == "idle") {
 			budget = slot.ActiveTokenBudgetMax

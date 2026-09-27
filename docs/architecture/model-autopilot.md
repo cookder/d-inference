@@ -1,234 +1,164 @@
-# Opt-in model autopilot
+# Experimental model Autopilot
 
-> Last updated: 2026-09-11 · commit `c7fda9228`
+> Last updated: 2026-09-26 · commit `77852451d`
 
-Model autopilot manages GPU residency on explicitly enrolled providers, using
-cached models and measured network workload. It fills deficits in useful,
-deadline-qualified capacity and names every model it may unload. Configuration
-and consent are separate gates; the controller ships disabled and observation-only
-by default ([configuration](../reference/configuration.md#model-autopilot)).
+Autopilot manages memory residency for an explicitly selected set of provider
+models. Provider enrollment defaults to off. After selection and verification,
+a compatible coordinator activates real demand-based control; a shadow run is
+not a prerequisite. Files remain on disk.
 
 ## Context
 
-The [48-hour evidence](../reports/2026-09-11-autopilot-capacity-evidence.md) found
-that exhausted first-content deadlines dominated 429s and that most sampled
-attempts selected already resident weights. A count of machines, resident models
-or retry attempts therefore does not measure capacity that can serve the offered
-work. Autopilot complements routing and provider admission; it does not promise
-a particular reduction in 429s.
-
-Provider `--all` and an empty enabled-model list describe advertised local
-inventory, not consent. `darkbloom autopilot enable` saves explicit consent for
-the next provider restart. Private-only providers do not enroll. Once enrolled,
-network requests use confirmed warm models and legacy cold-load commands are
-blocked, even when the coordinator controller is disabled or observing. The
-provider's ordinary idle-unload timer is paused. Shadow computation itself does
-not change residency; provider enrollment changes who owns residency decisions.
-
-Sources: `coordinator/registry/model_management_routing.go`
-(`providerAutopilotRoutingBlockedLocked`, `providerLegacyModelChangesBlockedLocked`);
-`provider-swift/Sources/darkbloom/AutopilotCommand.swift` (`Autopilot`);
-`provider-swift/Sources/ProviderCore/ProviderLoop+IdleTimeout.swift`
-(`startIdleMonitor`).
+Cached models are not necessarily loaded, and loaded models on one Mac share
+its GPU and KV budget. Autopilot moves useful capacity toward qualified demand
+while preserving active requests, local reservations, pins and donor coverage.
+Initial downloads are a separate, user-authorized setup action.
 
 ## Mechanism
 
 ```mermaid
 flowchart TD
-    A[Validated public logical request] --> B[Once-only terminal enrichment of arrival window]
-    B --> C[Mean work and tail prompt estimate]
-    D[Fresh fleet, occupancy, cached inventory and consent] --> E[Qualified shared GPU capacity]
-    C --> F[Compare offered demand and live occupancy]
-    E --> F
-    F --> G[Score feasible recipient and every donor]
-    G --> H{Observe only?}
-    H -->|Yes| I[Log hypothetical plan; no reservation]
-    H -->|No| J[Recheck live state and reserve whole device]
-    J --> K[Send immutable command ID and explicit victims]
-    K --> L[Provider rechecks local work, pins, memory and cached assistant]
-    L --> M[Unload named victims; load with implicit eviction disabled]
-    M --> N[Terminal status plus fresh paired capacity heartbeat]
-    N --> O[Reconcile actual residency and release reservation]
-    K --> P[Lost delivery or acknowledgement]
-    P --> Q[Bounded retransmission of the same command]
-    Q --> N
-    P --> R[Watchdog retains uncertain fence]
+  A[Start: experimental opt-in, default No] --> B[Select supported models]
+  B --> C[Check disk, download missing builds, verify selection]
+  C --> D[Save consent and exact approved build IDs]
+  D --> E[Coordinator control lease and provider acknowledgement]
+  F[Logical arrivals by request shape] --> G[Capacity planner]
+  E --> G
+  G --> H[Persist intent and reserve idle device]
+  H --> I[Provider rechecks session, selection, work, pins and memory]
+  I --> J[Release only named victims and load cached target]
+  J --> K[Matching terminal heartbeat confirms actual capacity]
+  K --> L[Routing and outcome records]
+  L --> G
 ```
 
-### Work and capacity
+### Enrollment and ownership
 
-`coordinator/api/autopilot_demand.go` gives each validated public logical request
-one terminal sample, independent of retries and speculative attempts. Scoped
-owner/serial traffic, account rejections and intrinsic invalid envelopes do not
-become public placement pressure. Honest short requests remain eligible samples.
-The registry groups samples by original `ReceivedAt`, handles out-of-order
-completion and expires old arrivals. It retains bounded model and time buckets,
-not identities or prompts (`coordinator/registry/autopilot_demand.go`).
+`Start.resolveAutopilotChoice` asks once on the normal interactive start path.
+Blank/EOF means No. `--autopilot` is explicit scripted consent and requires model
+selection; `--all` cannot enable it. `saveAutopilotEnrollment` runs after selected
+builds are verified and an existing provider has drained. A cancelled picker or
+failed download never saves enrollment. Restarts use the saved choice.
 
-`PromptTokens` is mean offered prompt work; `TailPromptTokens` is a conservative
-p90 histogram bound used for deadline fit. Actual completed output and valid warm
-service duration have independent sample counts, so a completed cold request can
-teach output length without pretending to provide warm service timing. Terminal
-enrichment is delayed: the controller covers unfinished work using the maximum
-of offered work and live occupancy, never their sum.
+`ModelAutopilotSettings.selectedModels` is an exact-build allowlist. An empty list
+cannot enroll, and another model appearing on disk cannot expand permission.
+The provider rechecks this list before loads, prefetches, advertisements and
+network acceptance. Desired-build release updates outside the selection are
+ignored; use `darkbloom autopilot models` to approve/download a replacement build.
+Selection changes use the existing safe service restart. While enrolled,
+`darkbloom switch` directs the operator to `darkbloom autopilot models` or opt-out
+so a manual hosted-model transaction cannot bypass the approved selection.
+Both operation owners reject overlap, including model-switch validation. Pause, resume, pins and
+disable update a config revision consumed by the running daemon's capacity poll.
 
-`coordinator/registry/autopilot_snapshot.go` (`autopilotModelFitLocked`) combines
-per-model/solo TPS, observed prefill, quality concurrency, reliability history,
-thermal state, CPU and memory pressure, and first-content policy. Catalog/runtime,
-trust, dedication, vision, tool-choice/grammar capabilities and memory gates still
-apply. M5/NAX requirements come from
-catalog capabilities, not a hardcoded generation ranking. Unknown load duration
-uses the configured prior; a reported slot load duration can replace that prior.
+Protocol 2 separates `enabled` consent from `active` control. The coordinator
+sends `model_autopilot_control` with its connection ID, the approved configuration
+revision, and an expiry of three controller intervals plus ten seconds. Only a
+matching acknowledged lease transfers normal network cold-load/idle ownership.
+Absent or expired control restores ordinary serving policy. An explicitly paused
+provider retains its resident set and accepts network work only on ready models.
+An accepted operation retains ownership until it finishes even after opt-out,
+pause, connection loss or lease expiry; newer commands cannot overlap it.
 
-`coordinator/registry/autopilot_planner.go` allocates at most one GPU's time across
-co-resident workloads. Deadline-infeasible residents retain ownership and can
-consume time, but earn no useful capacity credit. Pending operations are future
-capacity, never protection for a donor needed now. Each model uses one fixed
-reference value for recovered work; slower recipients cannot receive a higher
-benefit simply because they take longer to execute an identical request.
+The local diagnostic phases are `off`, `waiting`, `active`, `paused`,
+`transitioning`, and `recovering`. `darkbloom autopilot status` distinguishes
+configured and live state. The account provider endpoint includes the live
+snapshot; the admin endpoint exposes controller status and recent operations.
 
-### Placement and unloading
+### Demand and placement
 
-A candidate must be enrolled, idle across the device, fresh and outside pending
-operations/backoff. The planner prefers a feasible placement with useful benefit
-after load and displacement costs, preserving scarce capabilities for unmet
-restricted models. It protects every affected donor, including retained
-co-residents fenced during the transition. Warm-pool operator floors remain
-inputs; a pending copy does not replace present donor coverage.
+`beginAutopilotDemand` creates a request-owned observation after entering an
+inference endpoint. Admission arms it only after public authentication, account
+limits, balance and parsing checks. Retries and speculative attempts annotate
+the same observation; terminal consumption occurs once. Owner/private traffic,
+account rejections, invalid requests and coordinator lock saturation do not
+create placement pressure. Structural provider memory/token refusals remain
+supply demand; canonical context violations are intrinsically invalid.
 
-A load that already fits needs no victim. Otherwise the planner selects explicit
-unpinned residents whose residence and idle dwell have elapsed. Incoming weight
-estimates include load padding; reclaim credit uses actual resident ownership,
-not scanner padding or an OS RSS measurement. The provider repeats total-victim
-feasibility before its
-first mutation, then calls `ensureModelLoaded` with `allowEviction: false`.
-Required enabled MTP assistants must also be verified locally before victims are
-removed. Autopilot commands neither download missing model/assistant artifacts
-nor delete cached disk files.
+`autopilotShapeKey` splits exact model builds by vision/tools/constraint flags,
+eight prompt-size bins, four output-limit bins and the resolved first-content
+SLA class. Deadline-exempt requests retain that policy; no account identity is stored. The bounded shape tracker
+retains no prompts or consumer identities. Ordinary workload moves require at
+least eight observations over three occupied ten-second buckets. Initial
+bootstrap and protected-floor repairs may act sooner. Shape-specific eligibility
+prevents a specialized request from excluding a provider from ordinary traffic.
 
-Standalone idle unloading is separately disabled by default. When enabled, it
-requires sustained quiet, the configured idle/dwell limits, device memory
-pressure, zero live device work, no protected floor loss and no pinned victim.
-The exact defaults and fixed thresholds are in the
-[configuration reference](../reference/configuration.md#model-autopilot).
+`autopilotNodeContribution` divides one machine's execution capacity among its
+resident workloads. The planner combines offered work and live occupancy with
+`max`, avoiding double counting. It debits every retained and removed model on a
+machine during a transition, and pending capacity never protects current donor
+coverage. Configured warm floors remain protected when the legacy warm-pool
+controller is disabled. Positive-benefit additions take precedence over replacements.
 
-Desired-build release policy remains independent. Its prefetch/reconciliation is
-deferred behind an active autopilot owner, then resumed. Explicitly superseded,
-no-longer-advertised residents have a separate cleanup path so pausing the idle
-timer does not retain obsolete builds forever. Cleanup preserves pins and live
-request/local/MTP ownership and does not infer retirement merely from a missing
-catalog entry (`provider-swift/Sources/ProviderCore/Autopilot/ProviderLoop+ReleaseCleanup.swift`,
-`cleanupAutopilotSupersededModels`).
+Replacement requires minimum residence and a separately reported idle duration.
+The provider default is thirty minutes residence and sixty seconds inactivity;
+these are conservative initial settings, not measured optimal timers. Standalone
+unloading requires the configured quiet window, sufficient other coverage, no
+pins and an idle device. A fresh empty enrollment can bootstrap one compatible
+model. A model deliberately unloaded after a quiet period is not immediately
+reloaded merely because its machine is empty.
 
-## Algorithm choice and advancement gates
+### Execution, timing and records
 
-The implemented policy is a bounded workload-weighted greedy search with
-switching costs. This is a design choice under the measured telemetry limits,
-not a claim of global optimality or a queue-stability theorem.
+`reserveAutopilotAction` replans under the registry lock against the same session,
+capacity sequence and resident set. The command carries exact victims, expected
+residents, session and consent revision. The provider checks all guards again,
+uses the current load admission path, and disables implicit eviction. Complete
+load footprints, native offload allowances, activation reserves and minimum KV
+remain authoritative. Optional MTP can fall back to the target alone and cannot
+initiate an Autopilot download.
 
-| Approach | Status | Fit for this network and next gate |
-|---|---|---|
-| Machine-count deficit | Baseline only | Simple to inspect, but treats unequal machines and shared resident slots as interchangeable. Retain as a replay control, not the production capacity objective. |
-| Workload-weighted greedy with switching costs | **Implemented** | Choose a feasible move using deadline-qualified service, cached artifacts, fixed per-model work value, load cost, donor coverage and scarce capabilities. Recheck every move against current reservations; no long-range forecast is required. |
-| Queue/backpressure or virtual deficit queues | Deferred | Could prioritize persistent unmet work and fairness across models. First establish unique logical backlog and starvation measurements; retry counts cannot be queue arrivals. [Neely's framework](https://link.springer.com/book/10.1007/978-3-031-79995-2) covers max-weight, virtual queues and cost/delay tradeoffs; its guarantees do not automatically apply to this controller. |
-| Rolling-horizon optimization | Deferred | Repeated constrained optimization could coordinate several placements using forecasts of demand, load time and future availability. [Receding-horizon control](https://web.stanford.edu/~boyd/papers/code_gen_rhc.html) provides that formulation; first validate these forecasts and strict solver-time/fallback bounds on our workload. The current one-step search is not MPC. |
-| Learned quality/load ranking | Deferred beyond current measured-rate estimates | Consider improving prediction calibration before learning a placement policy. Require timestamped exposure/outcome data, drift checks and held-out calibration; do not explore destructive placements on live providers to collect labels. |
+`ModelAutopilotHistory` retains bounded load measurements after unloading and
+restart, keyed by exact model ID and verified weight hash. The planner accepts
+recent matching measurements and otherwise uses the configured prior. Provider
+status records load, release and total operation duration; coordinator records
+also include time until the authoritative terminal heartbeat. None is a promise
+of an end-to-end latency percentile.
 
-Cache locality and startup cost are supported design considerations in
-[ServerlessLLM](https://www.usenix.org/conference/osdi24/presentation/fu).
-Its system and published speedups are not performance claims for Darkbloom.
-Our first release keeps downloads outside autopilot and uses explicit load-time
-priors where completed-load measurements are missing.
-
-The retained hourly replay modestly favored its cost-aware simulator policy in aggregate
-while weakening restricted-model coverage; aggressive surplus release increased
-churn and reduced modeled coverage. Together with missing engine segments on
-timed-out requests and sparse cold-load samples, that supports conservative
-switching and explicit per-model gates, not tuning a more complex optimizer to
-an assumed causal model. See the [measurement limits](../reports/2026-09-11-autopilot-capacity-evidence.md).
-
-Advance a deferred method only after event-level, chronological replay preserves
-actual arrivals, departures, drains, failure outcomes and paired capacity;
-measured load distributions and prediction errors hold up on later windows;
-and a shadow comparison improves per-model completion/deadline quality without
-unacceptable churn, donor loss or restricted-hardware starvation. Promotion
-still requires bounded canary validation and the same ownership/safety gates.
+The `autopilot_events` ledger stores idempotent command phases, intended and
+actual resident sets, predicted benefit and measured durations. Intent must be
+persisted before dispatch. Ledger failure suspends new operations while pending
+outcomes remain queued for retry. Existing request-outcome records provide the
+completion and first-content evidence for comparisons by model/shape/window.
+No causal improvement is inferred from command success alone.
 
 ## Invariants
 
-1. **Consent is explicit.** Missing state grants no control; the provider setting
-   and operator active-controller setting are both required for new commands.
-   `autopilot_config.go` (`DefaultAutopilotConfig`),
-   `coordinator/registry/model_management_routing.go` and
-   `provider-swift/Sources/ProviderCore/Autopilot/ModelAutopilotSettings.swift` enforce their
-   respective sides.
-2. **Reservation owns the whole device.** Current session, capacity sequence,
-   resident set, donor coverage and operation limits are rechecked before
-   `autopilotPending` is installed. Network admission and competing legacy model
-   changes respect that ownership (`coordinator/registry/autopilot_commands.go`,
-   `reserveAutopilotAction`; `coordinator/registry/model_management_routing.go`).
-3. **Only named victims may be removed.** The provider validates all victims,
-   pins, dwell, leases, cache presence and total memory feasibility, then refuses
-   implicit eviction (`provider-swift/Sources/ProviderCore/Autopilot/ModelAutopilotPolicy.swift`,
-   `rejection`; `provider-swift/Sources/ProviderCore/ProviderLoop+Autopilot.swift`,
-   `runModelAutopilot`).
-4. **Acknowledgement is not capacity.** Only a later accepted capacity sequence
-   paired with the same terminal command ID and a matching resident set releases
-   the reservation. Stale/mismatched status cannot manufacture warm capacity
-   (`coordinator/registry/autopilot_provider_state.go`,
-   `reconcileAutopilotHeartbeatLocked`).
-5. **Retries preserve identity and expiry.** Bounded sends reuse the exact
-   command. An unseen expired command fails; an active/completed identical
-   command reports its known result. Watchdog expiry retains uncertainty rather
-   than assuming rollback (`coordinator/registry/autopilot_retries.go`,
-   `retryAutopilotCommands`; provider `handleModelAutopilot`).
-6. **Shared work is not multiplied.** Logical demand excludes retry
-   multiplication; occupancy overlaps offered work; co-resident capacities share
-   GPU time; useful floors count qualified contributions
-   (`coordinator/registry/autopilot_demand.go`, `autopilot_planner.go`).
+1. Consent is explicit, nonempty and revisioned: `ModelAutopilotSettings.hasConsent`.
+2. Session and selection must match before mutation: `ModelAutopilotPolicy.rejection`.
+3. Only named idle, unpinned victims can be released: `runModelAutopilot` and `unloadModel`.
+4. The provider owns final memory admission: `ensureModelLoaded` and `UnifiedMemoryCap`.
+5. Status alone creates no capacity: `reconcileAutopilotHeartbeatLocked`.
+6. Operator pause stops new reservations while keeping pending ownership: `SetAutopilotPaused`.
+7. An uncertain send or watchdog expiry never implies rollback: `sendAutopilotCommand` and `markAutopilotWatchdogs`.
 
-## Failure modes and estimation limits
+## Failure modes
 
-| Condition | Behavior and limit |
-|---|---|
-| Coordinator remains disabled/shadow after provider enrollment | No autopilot loads are issued; the enrolled provider still uses managed residency rules and warm-only network admission. Enrollment is not a no-op. |
-| State, capacity sequence or resident set changes | Replan/reject; provider rechecks after suspension and before mutation. |
-| Missing primary or required assistant cache | Reject before victim mutation; operator/release inventory preparation remains separate. |
-| Load fails after some victims were removed | Report failure and reconcile actual remaining capacity. The operation is not an atomic rollback to the old resident set; disk files remain available. |
-| Ambiguous write, lost status or watchdog expiry | Keep the fence; repeat only the bounded identical command. A first-send queue-full proof that nothing was enqueued is a distinct safe cleanup path. |
-| Sparse, stale or missing measurements | Fall back conservatively or exclude the candidate; service and load priors are estimates, not measured distributions. |
-| Deadline failures, invalid requests or external traffic changes | Additional residency may not help. Track logical completion, first-content failures and request shape separately from placements. |
-
-The model uses aggregate recent workload and a mean/p90 shape approximation,
-not a full queueing forecast or a simulation of every multimodal request. The
-[retained 14-day replay](../reports/2026-09-11-autopilot-capacity-evidence.md#conditional-machine-quality-and-loading-uncertainty)
-is a coarse counterfactual, not production uplift evidence.
-
-A local, uncontended 1,000-provider × 8-build benchmark of the implementation
-measured reservation around **3.2ms** (sample p95 around **3.6ms**) and a complete
-tick around **10.97ms** (sample p95 around **11.55ms**). The reservation benchmark
-includes snapshot/replanning under the registry write lock; the tick uses a fake
-sender. These are local development measurements, not production lock-tail or
-request-latency claims (`coordinator/registry/autopilot_controller_benchmark_test.go`,
-`BenchmarkAutopilotControllerFleet1000`).
+A failed setup preserves the running provider and its prior consent. A lost
+controller lease restores ordinary policy after any accepted operation finishes.
+A failed target load may leave fewer residents; the terminal heartbeat reports
+that actual state. An ambiguous operation stays fenced until reconciled.
+After a coordinator restart, provider registration and paired capacity rebuild
+live ownership; historical incomplete ledger phases remain evidence of
+uncertainty rather than proof of success. Disk files are never deleted by a
+residency decision.
 
 ## Code map
 
-| Concern | Source / symbols |
+| Concern | Source |
 |---|---|
-| Startup, settings and tick summaries | `coordinator/registry/autopilot_config.go`, `autopilot_controller.go`; `StartAutopilotController`, `tick`, `AutopilotSnapshot` |
-| Logical request capture and observations | `coordinator/api/autopilot_demand.go`; `beginAutopilotDemand`, `finishAutopilotDemand`, `observeAutopilotCompletion` |
-| Arrival windows and independent sample counts | `coordinator/registry/autopilot_demand.go`; `record`, `snapshot` |
-| Fleet predicates and quality fit | `coordinator/registry/autopilot_snapshot.go`; `autopilotFleetSnapshotLocked`, `autopilotModelFitLocked` |
-| Useful coverage, victim selection and benefit | `coordinator/registry/autopilot_planner.go`; `autopilotCoverage`, `autopilotVictims`, `planAutopilotAction` |
-| Reservation, retries and heartbeat reconciliation | `coordinator/registry/autopilot_commands.go`, `autopilot_retries.go`, `autopilot_provider_state.go` |
-| Provider command ownership and release cleanup | `provider-swift/Sources/ProviderCore/ProviderLoop+Autopilot.swift`; `provider-swift/Sources/ProviderCore/Autopilot/ProviderLoop+ReleaseCleanup.swift` |
-| Consent and wire | `provider-swift/Sources/darkbloom/AutopilotCommand.swift`; `coordinator/protocol/model_autopilot.go`; `provider-swift/Sources/ProviderCore/Protocol/ModelAutopilot.swift` |
+| Startup consent and verification | `provider-swift/Sources/darkbloom/StartCommand+Autopilot.swift` |
+| Selection and download plan | `provider-swift/Sources/darkbloom/StartCommand+Picker.swift`; `provider-swift/Sources/ProviderCore/Models/ModelDownloader+Selection.swift` |
+| Live local controls | `provider-swift/Sources/darkbloom/AutopilotCommand.swift`; `provider-swift/Sources/ProviderCore/Autopilot/ProviderLoop+AutopilotControl.swift` |
+| Protocol | `coordinator/protocol/model_autopilot.go`; `provider-swift/Sources/ProviderCore/Protocol/ModelAutopilot.swift` |
+| Shapes and planning | `coordinator/registry/autopilot_shapes.go`; `coordinator/registry/autopilot_coverage.go`; `coordinator/registry/autopilot_planner.go` |
+| Activation and execution | `coordinator/registry/autopilot_activation.go`; `coordinator/registry/autopilot_commands.go`; `provider-swift/Sources/ProviderCore/ProviderLoop+Autopilot.swift` |
+| Durable records | `coordinator/store/postgres_autopilot.go`; `coordinator/registry/autopilot_events.go` |
+| Operator view | `coordinator/api/autopilot_handlers.go` |
 
 ## Related
 
-- [Operator rollout and rollback](../operations/model-autopilot.md)
-- [CLI consent and pins](../provider/cli-reference.md#darkbloom-autopilot)
-- [Wire contract](../reference/protocol-messages.md#model_autopilot)
-- [Configuration and timing defaults](../reference/configuration.md#model-autopilot)
-- [Measured capacity and 429 evidence](../reports/2026-09-11-autopilot-capacity-evidence.md)
+- [Operator procedures](../operations/model-autopilot.md)
+- [Provider CLI](../provider/cli-reference.md#darkbloom-autopilot)
+- [Configuration](../reference/configuration.md#model-autopilot)
+- [Protocol](../reference/protocol-messages.md#model_autopilot)

@@ -25,8 +25,8 @@ struct Status: AsyncParsableCommand {
         print("Backend port: \(config.backend.port)")
         print("Configured model: \(config.backend.model ?? "auto-select")")
         if config.backend.modelAutopilot.enabled && !config.coordinator.privateOnly {
-            print("Memory when idle: managed by model autopilot (configured; applies after restart)")
-            print("  Stored idle policy resumes after opt-out: \(IdleUnloadPolicy.describe(minutes: config.backend.idleTimeoutMins))")
+            print("Memory when idle: Autopilot — Experimental (run `darkbloom autopilot status` for live state)")
+            print("  Stored idle policy after opt-out: \(IdleUnloadPolicy.describe(minutes: config.backend.idleTimeoutMins))")
         } else {
             print("Memory when idle: \(IdleUnloadPolicy.describe(minutes: config.backend.idleTimeoutMins)) (manage with `darkbloom idle`)")
         }
@@ -101,6 +101,7 @@ struct Status: AsyncParsableCommand {
             print("Daemon: not running (run `darkbloom start`)")
             return
         }
+        if let phase = state.autopilotPhase { print("Autopilot — Experimental: \(phase)") }
         let alive = daemonProcessAlive(pid: state.pid)
         if !alive {
             print("Daemon: not running (stale state file)")

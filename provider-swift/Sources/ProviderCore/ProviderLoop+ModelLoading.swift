@@ -198,6 +198,7 @@ extension ProviderLoop {
         modelId: String, allowEviction: Bool = true, autopilotCommandId: String? = nil
     ) async throws {
         await waitForMTPUpgrade(modelId)
+        guard autopilotAllowsModel(modelId) else { throw InferenceError.modelLoadFailed("model_not_selected") }
         try checkAutopilotLoadOwnership(autopilotCommandId)
         try ModelRuntimeRequirements.requireEligible(
             modelID: modelId, available: loopConfig.runtimeCapabilities)
@@ -258,7 +259,6 @@ extension ProviderLoop {
         var mtpPreparation = await specDecPreparation(
             modelId: modelId, modelInfo: modelInfo, modelDirectory: modelPath,
             allowDownload: autopilotCommandId == nil)
-        if autopilotCommandId != nil { try validateAutopilotAssistant(mtpPreparation) }
 
         // Re-check residency and in-flight loads after the preparation await:
         // a concurrent request for the same cold model can pass the checks
@@ -758,6 +758,7 @@ extension ProviderLoop {
             // Remember the serving set across restarts: the persisted file is
             // the default startup preload plan (ProviderLoop+StartupPreload).
             persistLoadedModelSet()
+            recordAutopilotLoadTime(model: modelId, milliseconds: Int64(max(0, loadMs.rounded())))
             await updateAggregateCapacity()
             logger.info("Model loaded: \(modelId) (\(modelSlots.count) model(s) in memory)")
 
@@ -846,6 +847,7 @@ extension ProviderLoop {
     @discardableResult
     internal func unloadModel(_ modelId: String, forEviction: Bool = false, autopilotCommandId: String? = nil) async -> Bool {
         await waitForMTPUpgrade(modelId)
+        if forEviction && autopilotConsented && autopilotPinnedModels.contains(modelId) { return false }
         // An idle/eviction candidate may have been captured before the
         // autopilot transaction reserved this box. Only its explicit victims
         // may be removed until the transaction settles.
@@ -1029,7 +1031,8 @@ extension ProviderLoop {
     private func evictableModelSlots() -> [String: ModelSlot] {
         let modelsWithInflight = Set(requestToModel.values)
         return modelSlots.filter {
-            !modelsWithInflight.contains($0.key)
+            !(autopilotConsented && autopilotPinnedModels.contains($0.key))
+                && !modelsWithInflight.contains($0.key)
                 && !hasLocalReservation($0.key)
                 && !modelsUnloading.contains($0.key)
                 && !isMTPUpgradeTargetRetained($0.key)

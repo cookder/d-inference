@@ -272,6 +272,13 @@ public actor ProviderLoop {
 
     // Residency operations outlive WebSocket reconnects; never clear uncertain
     // ownership on a transport timeout. Fresh heartbeats reconcile completion.
+    internal var autopilotTimingHistory = ModelAutopilotHistory()
+    internal var autopilotTimingLoaded = false
+    internal var autopilotLastElapsedMs: Int64 = 0
+    internal var autopilotLastReleaseMs: Int64 = 0
+    internal var autopilotLastLoadMs: Int64 = 0
+    internal var autopilotSettingsOverride: ModelAutopilotSettings?
+    internal var autopilotControl: ModelAutopilotControl?
     internal var autopilotCommand: ModelAutopilotCommand?
     internal var autopilotTask: Task<Void, Never>?
     internal var autopilotMutationStarted = false

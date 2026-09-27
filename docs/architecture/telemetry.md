@@ -1,6 +1,6 @@
 # Telemetry
 
-> Last updated: 2026-09-13 · commit `d4bab49a9`
+> Last updated: 2026-09-26 · commit `77852451d`
 
 How operational data leaves a provider, what the coordinator does with it, and
 why nothing on that path can carry a prompt or slow a request. The heartbeat is
@@ -354,3 +354,14 @@ for populations, labels and reset semantics (`coordinator/api/cache_model_teleme
 - [`system-profiler.md`](system-profiler.md) — per-attempt `profile`, `request_profiles`, `fleet_snapshots`
 - [`request-outcome-observability.md`](request-outcome-observability.md) — outcome taxonomy behind the request metrics
 - [`scheduling.md`](scheduling.md), [`routing.md`](routing.md) — what the heartbeat fields decide
+
+## Autopilot observations
+
+`coordinator/api/autopilot_demand.go` (`beginAutopilotDemand`, `finishAutopilotDemand`)
+tracks one validated public logical request across attempts. Bounded model/shape
+buckets exclude account and intrinsically invalid failures while preserving
+capacity-related supply refusals. No prompt or consumer identity enters them.
+`coordinator/store/autopilot.go` (`AutopilotRecord`) defines durable command phase
+records. These capture intended/actual residents and transition timing; use the
+request-outcome ledger to evaluate completion and first-content effects. See
+[Autopilot](model-autopilot.md).

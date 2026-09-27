@@ -7,8 +7,14 @@ import (
 	"github.com/eigeninference/d-inference/coordinator/protocol"
 )
 
-func managedProviderState(active string) *protocol.ModelAutopilotState {
-	return &protocol.ModelAutopilotState{Protocol: 1, Enabled: true, CachedOnly: true, ActiveCommandID: active, MaxModelSlots: 3}
+func managedProviderState(p *Provider, active string) *protocol.ModelAutopilotState {
+	p.autopilotControlRevision = "test"
+	p.autopilotControlUntil = time.Now().Add(time.Hour)
+	models := []string{}
+	for _, m := range p.Models {
+		models = append(models, m.ID)
+	}
+	return &protocol.ModelAutopilotState{Protocol: protocol.ModelAutopilotProtocol, Active: true, SessionID: p.ID, Revision: "test", SelectedModels: models, Enabled: true, CachedOnly: true, ActiveCommandID: active, MaxModelSlots: 3}
 }
 
 func TestAutopilotRoutingFencePreservesWarmAndLegacyCapacity(t *testing.T) {
@@ -34,7 +40,7 @@ func TestAutopilotRoutingFencePreservesWarmAndLegacyCapacity(t *testing.T) {
 				p.BackendCapacity.Slots = nil
 			}
 			if tc.managed {
-				p.ModelAutopilot = managedProviderState(tc.active)
+				p.ModelAutopilot = managedProviderState(p, tc.active)
 			}
 			p.mu.Unlock()
 			candidates, capacity, tooLarge := reg.QuickCapacityCheck(model, 32, 64, RequestTraits{})
@@ -61,7 +67,7 @@ func TestAutopilotRoutingFenceDoesNotBlockPlannerStructuralEligibility(t *testin
 	model := "managed-planning-model"
 	p := makeWarmPoolColdProvider(t, reg, "provider", model, 80, 64, 0)
 	p.mu.Lock()
-	p.ModelAutopilot = managedProviderState("")
+	p.ModelAutopilot = managedProviderState(p, "")
 	p.mu.Unlock()
 	reg.mu.RLock()
 	p.mu.Lock()
@@ -88,7 +94,7 @@ func TestAutopilotCachedPlanRevalidatesManagedTransitionsAndColdResidency(t *tes
 				t.Fatalf("fixture must retain warm alternate: winner=%v plan=%v", winner, plan)
 			}
 			alternate.mu.Lock()
-			alternate.ModelAutopilot = managedProviderState("")
+			alternate.ModelAutopilot = managedProviderState(alternate, "")
 			if active {
 				alternate.ModelAutopilot.ActiveCommandID = "operation"
 			} else {
@@ -116,7 +122,7 @@ func TestAutopilotManagedProviderCannotReceiveLegacyModelChanges(t *testing.T) {
 	model := "managed-legacy-model"
 	p := makeWarmPoolColdProvider(t, reg, "managed", model, 80, 64, 0)
 	p.mu.Lock()
-	p.ModelAutopilot = managedProviderState("")
+	p.ModelAutopilot = managedProviderState(p, "")
 	p.mu.Unlock()
 	sent := captureWarmPoolLoads(reg)
 	reg.ConfigureWarmPool(testWarmPoolConfig())
@@ -159,7 +165,7 @@ func TestAutopilotTransitionCannotBypassWithOwnerNetworkRouting(t *testing.T) {
 	p := makeSchedulerProvider(t, reg, "provider", model, 80)
 	p.mu.Lock()
 	p.AccountID = "owner"
-	p.ModelAutopilot = managedProviderState("operation")
+	p.ModelAutopilot = managedProviderState(p, "operation")
 	p.mu.Unlock()
 	pr := &PendingRequest{RequestID: "owner-request", Model: model, EstimatedPromptTokens: 32, RequestedMaxTokens: 64, OwnerAccountID: "owner", SelfRouteOnly: true}
 	if winner, _ := reg.ReserveProviderEx(model, pr); winner != nil {

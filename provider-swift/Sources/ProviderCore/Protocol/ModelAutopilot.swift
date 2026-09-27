@@ -1,9 +1,19 @@
 import Foundation
 
-/// Protocol 1 is cached-only. Absent snapshot means no consent; neither an empty
+/// Protocol 2 is cached-only. Absent snapshot means no consent; neither an empty
 /// enabled_models allowlist nor an advertised build implies opt-in.
 public struct ModelAutopilotSnapshot: Codable, Sendable, Equatable {
-    public var protocolVersion: Int = 1
+    public var protocolVersion: Int = 2
+    public var active: Bool = false
+    public var paused: Bool = false
+    public var sessionId: String?
+    public var revision: String = ""
+    public var selectedModels: [String] = []
+    public var minIdleSeconds: Int = 60
+    public var loadHistory: [ModelAutopilotLoadTiming]?
+    public var lastElapsedMs: Int64?
+    public var lastReleaseMs: Int64?
+    public var lastLoadMs: Int64?
     public var enabled: Bool
     public var cachedOnly: Bool = true
     public var minDwellSeconds: Int
@@ -32,6 +42,10 @@ public struct ModelAutopilotSnapshot: Codable, Sendable, Equatable {
     }
 
     enum CodingKeys: String, CodingKey {
+        case active, paused, revision
+        case sessionId = "session_id", selectedModels = "selected_models", minIdleSeconds = "min_idle_seconds"
+        case loadHistory = "load_history"
+        case lastElapsedMs = "last_elapsed_ms", lastReleaseMs = "last_release_ms", lastLoadMs = "last_load_ms"
         case protocolVersion = "protocol", enabled
         case cachedOnly = "cached_only", minDwellSeconds = "min_dwell_seconds"
         case pinnedModels = "pinned_models", maxModelSlots = "max_model_slots"
@@ -65,6 +79,9 @@ public struct ModelAutopilotResident: Codable, Sendable, Equatable {
 }
 
 public struct ModelAutopilotCommand: Codable, Sendable, Equatable {
+    public var reason: String?
+    public var sessionId: String
+    public var revision: String
     public var commandId: String
     public var loadModelId: String?
     public var unloadModelIds: [String]
@@ -73,7 +90,9 @@ public struct ModelAutopilotCommand: Codable, Sendable, Equatable {
     public var leaseSeconds: Int
 
     public init(commandId: String, loadModelId: String? = nil, unloadModelIds: [String] = [],
-                expectedResidentModels: [String] = [], expiresAtMs: Int64, leaseSeconds: Int = 1_800) {
+                expectedResidentModels: [String] = [], expiresAtMs: Int64, leaseSeconds: Int = 1_800, sessionId: String = "", revision: String = "") {
+        self.sessionId = sessionId
+        self.revision = revision
         self.commandId = commandId
         self.loadModelId = loadModelId
         self.unloadModelIds = unloadModelIds
@@ -82,6 +101,8 @@ public struct ModelAutopilotCommand: Codable, Sendable, Equatable {
         self.leaseSeconds = leaseSeconds
     }
     enum CodingKeys: String, CodingKey {
+        case reason
+        case sessionId = "session_id", revision
         case commandId = "command_id", loadModelId = "load_model_id"
         case unloadModelIds = "unload_model_ids", expectedResidentModels = "expected_resident_models"
         case expiresAtMs = "expires_at_ms", leaseSeconds = "lease_seconds"
@@ -103,5 +124,32 @@ public struct ModelAutopilotStatus: Codable, Sendable, Equatable {
     enum CodingKeys: String, CodingKey {
         case commandId = "command_id", status, error
         case modelAutopilot = "model_autopilot"
+    }
+}
+
+public struct ModelAutopilotControl: Codable, Sendable, Equatable {
+    public var sessionId: String
+    public var revision: String
+    public var enabled: Bool
+    public var expiresAtMs: Int64
+    public init(sessionId: String, revision: String, enabled: Bool, expiresAtMs: Int64) {
+        self.sessionId = sessionId; self.revision = revision
+        self.enabled = enabled; self.expiresAtMs = expiresAtMs
+    }
+    enum CodingKeys: String, CodingKey {
+        case sessionId = "session_id", revision, enabled, expiresAtMs = "expires_at_ms"
+    }
+}
+public struct ModelAutopilotLoadTiming: Codable, Sendable, Equatable {
+    public var modelId: String
+    public var loadMs: Int64
+    public var measuredAtMs: Int64
+    public var weightHash: String
+    public init(modelId: String, loadMs: Int64, measuredAtMs: Int64, weightHash: String = "") {
+        self.weightHash = weightHash
+        self.modelId = modelId; self.loadMs = loadMs; self.measuredAtMs = measuredAtMs
+    }
+    enum CodingKeys: String, CodingKey {
+        case modelId = "model_id", loadMs = "load_ms", measuredAtMs = "measured_at_ms", weightHash = "weight_hash"
     }
 }

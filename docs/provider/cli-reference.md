@@ -452,32 +452,39 @@ is retained.
 
 ### `darkbloom autopilot`
 
-Explicit consent for coordinator-managed residency of cached advertised models.
-Source: `provider-swift/Sources/darkbloom/AutopilotCommand.swift` (`Autopilot`,
-`setModelAutopilot`). Every subcommand accepts `--config`; changes apply after
-`darkbloom restart`, not to an already-running daemon.
+Experimental memory residency for explicitly selected models; off by default.
+Source: `provider-swift/Sources/darkbloom/AutopilotCommand.swift` (`Autopilot`) and
+`provider-swift/Sources/darkbloom/StartCommand+Autopilot.swift` (`saveAutopilotEnrollment`).
+Every subcommand accepts `--config`.
 
-| Command / option | Default | Effect |
-|---|---|---|
-| `darkbloom autopilot` or `status` | read-only | Print saved consent, cached-only scope, dwell, pins and config path; this is not confirmation of coordinator acknowledgement |
-| `status --json` | `false` | Emit the saved `ModelAutopilotSettings` object |
-| `enable` | disabled until explicitly enabled | Persist `enabled = true`; the coordinator also needs an active controller to issue commands |
-| `enable --min-dwell-seconds <n>` | preserve saved value | Set minimum residence and idle time before replacement; accepted range `60...86400` seconds |
-| `enable --pin <id>...` | preserve saved pins when omitted | Replace the saved pin list with these deduplicated model IDs; the configured `[backend] model` is also pinned at runtime |
-| `disable` | — | Persist `enabled = false`; restart restores ordinary idle-policy ownership |
+| Command / option | Effect |
+|---|---|
+| `status`, `status --json` | Configured consent and fresh daemon state, including selected/ready models and transition result |
+| `enable` | Start the model picker, download/verify selections, and safely start active experimental enrollment |
+| `models` | Change the selected set through the same download/verify/drain/restart flow |
+| `pause`, `resume` | Live policy update; pause preserves resident models and blocks new automatic changes |
+| `pin MODEL_ID...`, `unpin MODEL_ID...` | Live update of unload protection; pins must belong to the selected set |
+| `disable` | Revoke new commands and restore the saved idle policy after any accepted operation finishes |
+| `start --autopilot --model ID` | Explicit scripted enrollment for the specified local model(s); repeat `--model` for multiple |
+| `start --no-autopilot` | Explicitly save the ordinary idle-policy mode |
 
-`--all` and `[backend] enabled_models = []` are inventory selection, not opt-in.
-Private-only providers do not enroll. Enrollment pauses automatic idle unloading
-and makes network inference warm-only outside explicit managed transitions;
-this remains true while the coordinator is disabled or observation-only. The
-stored idle timeout is preserved. Direct local inference and desired-build
-release policy retain their own guarded lifecycle.
+The normal interactive `start` asks **Autopilot — Experimental**, with `[y/N]`.
+A blank response means No. Enrollment requires a nonempty supported selection;
+`--all` cannot grant Autopilot permission. Downloads and verification finish
+before enrollment is saved. Repeat starts/restarts preserve the saved decision.
 
-Autopilot commands require local primary and configured assistant artifacts,
-name every allowed victim and retain disk files. To clear explicit pins, set
-`[backend.model_autopilot] pinned_models = []` in the config and restart; omitting
-`--pin` preserves them. See [autopilot architecture](../architecture/model-autopilot.md)
-and [operator rollout](../operations/model-autopilot.md).
+The selection is an exact-build allowlist; newly discovered models and
+coordinator-desired replacement builds outside it do not enroll automatically.
+Use `autopilot models` to approve a replacement. While enrolled, `darkbloom switch`
+returns a busy receipt with that guidance; disable Autopilot to use manual switching. Optional MTP may fall back to
+target-only serving without an Autopilot download. Files stay on disk.
+
+A compatible coordinator lease moves the provider from `waiting` to `active`.
+Consent alone does not alter ordinary residency behavior. `paused` retains ready
+models; `recovering` means an accepted transition is still settling. Live changes
+are consumed at the next capacity poll. `models` uses the existing safe restart.
+See [architecture](../architecture/model-autopilot.md) and
+[operator procedures](../operations/model-autopilot.md).
 
 ## `darkbloom beta`
 
@@ -1149,13 +1156,13 @@ override `provider.toml` for one process, are in
 | `[provider] update_jitter_seconds` | `300` | Max random delay before an automatic install or a network provider drains a model for a prepared MTP replacement; serving continues during the delay. `0` disables jitter; capped at `3600`. Standalone MTP upgrades skip this delay. Random staggering provides no fleet availability guarantee (`provider-swift/Sources/ProviderCore/Config/ProviderConfig.swift`, `updateJitterSeconds`; `provider-swift/Sources/ProviderCore/Update/UpdateJitter.swift`, `delay`; `provider-swift/Sources/ProviderCore/ProviderLoop+MTPDrain.swift`, `waitBeforeMTPUpgradeDrain`) |
 | `[backend] enabled_models` | `[]` | Advertise only these ids; empty = all serveable |
 | `[backend] model_cache_directory` | unset | Explicit saved hub directory; set or import once with `models location`, clear with `--reset`. Ambient cache variables never override it; hand-written relative paths are anchored to the config file (`provider-swift/Sources/ProviderCore/Config/ModelCacheConfiguration.swift`, `ConfigManager.modelCacheDirectory`) |
-| `[backend] idle_timeout_mins` | `60` | Unload a model idle this long; `0` disables; paused while model autopilot is enabled |
+| `[backend] idle_timeout_mins` | `60` | Unload a model idle this long; `0` disables; paused during active or explicitly paused Autopilot |
 | `[backend] max_model_slots` | `3` | Resident models |
 | `[backend] engine_v2_max_concurrent` | `4` (clamped to `[1, 8]`) | Concurrent requests per engine |
 | `[backend] engine_v2_kv_backend` | `"auto"` | `auto` / `paged` / `contiguous`; per-model table `engine_v2_kv_backend_by_model` takes precedence. Candidate `auto` tries paged only for the [exact qualified-artifact allowlist](../architecture/prefix-cache.md#kv-layouts), with contiguous fallback; all other IDs remain contiguous (`EngineV2KVBackendPolicy.parseSelection`, `preferredBackend`) |
 | `[backend] mtp_mode` | `auto` | Written by `darkbloom beta enable|disable mtp` |
-| `[backend.model_autopilot] enabled` | `false` | Explicit cached-residency consent; applies after restart, separate from `--all` (`provider-swift/Sources/ProviderCore/Autopilot/ModelAutopilotSettings.swift`) |
-| `[backend.model_autopilot] min_dwell_seconds` | `1800` | Minimum residence and idle time before autopilot replacement; runtime clamps to `60...86400` (`ModelAutopilotSettings.effectiveMinDwellSeconds`) |
+| `[backend.model_autopilot] enabled` | `false` | Experimental explicit consent; a nonempty selected set and activation lease are required (`provider-swift/Sources/ProviderCore/Autopilot/ModelAutopilotSettings.swift`) |
+| `[backend.model_autopilot] min_dwell_seconds` | `1800` | Minimum residence before Autopilot replacement; runtime clamps to `60...86400` (`ModelAutopilotSettings.effectiveMinDwellSeconds`) |
 | `[backend.model_autopilot] pinned_models` | `[]` | Models autopilot must retain; configured `[backend] model` is additionally pinned (`provider-swift/Sources/ProviderCore/ProviderLoop+Autopilot.swift`, `autopilotPinnedModels`) |
 | `[backend] startup_preload` | `true` | Preload `preload_models` when set, otherwise selected models (previously loaded first on coordinator starts), within slot and memory limits |
 | `[coordinator] url` | `"wss://api.darkbloom.dev/ws/provider"` | |
@@ -1271,3 +1278,15 @@ automatic updates with `darkbloom autoupdate disable`.
 
 
 GPT-OSS benchmark and foreground execution supports the [performance controls](../reference/configuration.md#gpt-oss-performance-controls). The full-projection and kernel rollback modes support paired comparisons with identical request inputs.
+
+### Autopilot enrollment fields
+
+Source: `provider-swift/Sources/ProviderCore/Autopilot/ModelAutopilotSettings.swift` (`ModelAutopilotSettings`).
+
+| `[backend.model_autopilot]` key | Default | Meaning |
+|---|---|---|
+| `consent_recorded` | `false` | An explicit startup decision was saved |
+| `selected_models` | `[]` | Exact approved build IDs; empty cannot enroll |
+| `revision` | empty string | CLI-generated identity for the approved configuration |
+| `paused` | `false` | Suspend new automatic changes while retaining ready models |
+| `min_idle_seconds` | `60` | Inactivity guard, independent from minimum residence |

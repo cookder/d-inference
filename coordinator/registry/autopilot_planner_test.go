@@ -19,7 +19,7 @@ func autopilotPlannerFit(rate, service float64) autopilotModelFit {
 func autopilotPlannerNode(id string, residents ...string) autopilotNode {
 	n := autopilotNode{
 		ID: id, Managed: true, Idle: true, Residents: append([]string(nil), residents...), Fits: map[string]autopilotModelFit{},
-		State: &protocol.ModelAutopilotState{
+		State: &protocol.ModelAutopilotState{MinIdleSeconds: 1800,
 			Protocol: protocol.ModelAutopilotProtocol, Enabled: true, CachedOnly: true,
 			MaxModelSlots: 3, FreeForLoadNoEvictGB: autopilotPlannerFloat(32),
 		},
@@ -214,7 +214,7 @@ func TestAutopilotPlannerStandaloneUnloadRequiresEveryGuard(t *testing.T) {
 		{"not opted in", func(f *autopilotFleet, _ *AutopilotConfig) { f.Nodes[0].Managed = false }, false},
 		{"busy", func(f *autopilotFleet, _ *AutopilotConfig) { f.Nodes[0].Idle = false }, false},
 		{"pending", func(f *autopilotFleet, _ *AutopilotConfig) { f.Nodes[0].Pending = true }, false},
-		{"no memory pressure", func(f *autopilotFleet, _ *AutopilotConfig) { f.Nodes[0].MemoryPressure = .2 }, false},
+		{"no memory pressure needed", func(f *autopilotFleet, _ *AutopilotConfig) { f.Nodes[0].MemoryPressure = .2 }, true},
 		{"unknown state", func(f *autopilotFleet, _ *AutopilotConfig) { f.Nodes[0].State = nil }, false},
 		{"pinned", func(f *autopilotFleet, _ *AutopilotConfig) { f.Nodes[0].State.PinnedModels = []string{"a"} }, false},
 		{"floor", func(f *autopilotFleet, _ *AutopilotConfig) { f.Floors = map[string]int{"a": 1} }, false},
@@ -224,7 +224,7 @@ func TestAutopilotPlannerStandaloneUnloadRequiresEveryGuard(t *testing.T) {
 		{"young residency", func(f *autopilotFleet, _ *AutopilotConfig) { f.Nodes[0].State.ResidentModels[0].ResidentSeconds = 1 }, false},
 		{"recent device work", func(f *autopilotFleet, _ *AutopilotConfig) { f.Nodes[0].State.ResidentModels[0].IdleSeconds = 1 }, false},
 		{"provider longer idle dwell", func(f *autopilotFleet, _ *AutopilotConfig) {
-			f.Nodes[0].State.MinDwellSeconds = 7200
+			f.Nodes[0].State.MinIdleSeconds = 7200
 			f.Nodes[0].State.ResidentModels[0].ResidentSeconds = 10800
 			f.Nodes[0].State.ResidentModels[0].IdleSeconds = 3600
 		}, false},

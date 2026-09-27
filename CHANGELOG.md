@@ -7,6 +7,9 @@
 - Confirm live model-switch success only after a same-session coordinator receipt proves routing resumed with refreshed capacity. Report a missing receipt as unconfirmed. Serialize autoupdate config changes with model-selection writes so toggling updates cannot restore stale hosted models.
 - Restore model prefetching before the switch readiness receipt can trigger a refreshed desired-build snapshot. Keep scheduled serving within its original window when model validation and hashing take time.
 - Preload selected models on every provider start, regardless of idle-memory policy, including standalone `--local` mode. Coordinator starts remain bounded by the startup timeout; local mode finishes preloading before listening. Slot and memory limits still apply.
+- Add default-off experimental Autopilot at provider startup: explicitly select supported models, download and verify missing builds, then activate demand-based memory residency. Preserve files, selected-model boundaries, pins, local work and donor capacity.
+- Add live Autopilot status, pause/resume, pins and disable; session-bound control, request-shape planning, retained load timings, durable operation records and an admin stop/status endpoint. A shadow run is optional.
+
 - Add explicit model-cache selection through `darkbloom models location`, with interactive confirmation, read-only `--check`, one-time `--from-env` import, and `--reset` to the legacy default. No beta flag, automatic restart, or weight movement.
 - Preserve existing providers' cache locations until an operator explicitly saves a path. Ambient Hugging Face/XDG variables never redirect runtime discovery, downloads, hashing, or removal; imported paths stay pinned when the environment changes.
 - Preserve filesystem traversal through symlinks and diagnose empty selected caches without mistaking incomplete download folders for models. See the [location command](docs/provider/cli-reference.md#darkbloom-models-location).

@@ -1,6 +1,6 @@
 # HTTP API contracts
 
-> Last updated: 2026-09-27 · commit `f99e56eb0`
+> Last updated: 2026-09-27 · commit `78725b45b`
 
 The complete public HTTP surface of the coordinator, derived from the 117 `HandleFunc` registrations in `routes()` (`coordinator/api/server.go`), including the `/v1/` catch-all. Every route is listed once below with its handler symbol, authentication requirement, and rate-limit bucket; the second half of the page gives the wire shapes, headers, error table, SSE framing, limits, timeouts, and version-gate semantics that those routes share. For *why* the pipeline is built this way see [`../architecture/components/consumer.md`](../architecture/components/consumer.md); for the crypto model behind sealed transport see [`../architecture/security/encryption.md`](../architecture/security/encryption.md).
 
@@ -831,3 +831,18 @@ An unknown payout outcome held for manual reconciliation remains `status=pending
 Promotion input is `{ "model_id": "...", "tokens": 150000000, "claim_starts_at": "RFC3339", "claim_ends_at": "RFC3339 or null", "signup_cutoff_at": "RFC3339", "max_claims": 250, "enabled": true }`. Signup eligibility is strictly before `signup_cutoff_at` using the persisted account creation timestamp. `max_claims` accepts integers in `[1, 1000000]`. A null claim end is supported, but the Bonsai launch draft has an explicit end. Only `enabled` is mutable; conflicting terms return `409 promotion_conflict`. Tokens are integers in `[1, 1000000000000]`. Grant responses have a `grants` array containing `model_id`, `total_tokens`, `used_tokens`, `reserved_tokens`, `remaining_tokens` (available after reservations), and `claimed_at`. There is no expiry field. Claiming requires `{"model_id":"..."}`, uses the server clock and does not require catalog registration. Repeated successful claims return the existing grant without consuming another slot, including after the window or cap closes. Service accounts receive no grant. Responses also include `offers` with `model_id`, `tokens`, `max_claims`, `remaining_claims`, `signup_cutoff_at`, `claim_ends_at` and `status` (`available`, `claimed`, `sold_out`, `ineligible`, or `unavailable`). Claim failures return `403 promotion_ineligible`, `409 promotion_sold_out`, `409 promotion_unavailable`, or `404 promotion_not_found`.
 
 Inference returns `402 free_tokens_exhausted` when the claimed allowance is exhausted or held by active requests and paid balance is insufficient. `402 promotion_balance_required` means remaining free tokens plus paid balance cannot cover the request's upper bound. Both carry an OpenAI-compatible `error.code` and user-facing message. Paid fallback succeeds when funded. See [operations/model-token-promotions.md](../operations/model-token-promotions.md).
+
+## Experimental model Autopilot
+
+Source: `coordinator/api/autopilot_handlers.go` (`handleAdminAutopilot`),
+`coordinator/api/me_handlers.go` (`handleMyProviders`).
+
+| Endpoint | Authorization | Result |
+|---|---|---|
+| `GET /v1/admin/autopilot` | Admin key or authenticated admin | Controller summary and up to 200 durable events in the last 24 hours; ledger read failure returns 503 |
+| `POST /v1/admin/autopilot` | Admin key or authenticated admin | Required JSON `{ "paused": true }` stops new reservations; `false` resumes. Existing operations continue reconciliation. Missing/invalid input returns 400; unavailable controller returns 409; successful mutation returns the summary independently of ledger availability |
+| `GET /v1/me/providers` | Provider owner | Optional `model_autopilot` live snapshot with consent, exact selected models, active/paused state and last operation |
+
+The operator pause lasts for the current coordinator process. Intent is persisted
+before dispatch. Ledger read/write errors are not success or rollback evidence.
+Snapshots and operation records contain model/control metadata, never prompts.

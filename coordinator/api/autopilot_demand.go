@@ -55,6 +55,8 @@ func armAutopilotDemand(r *http.Request, p inferenceAdmissionParams) {
 	if d.armed || d.finished {
 		return
 	}
+	d.sample.DeadlineKnown = true
+	d.sample.FirstContentDeadline = p.deadline
 	d.sample.Model = p.model
 	d.sample.PromptTokens = p.estimatedPromptTokens
 	d.sample.RequestedMaxTokens = p.requestedMaxTokens
@@ -117,9 +119,9 @@ func autopilotTerminalReason(reason string, status int) string {
 		return "deadline"
 	case "routing_saturated":
 		return "routing_saturated"
-	case "context_exceeded", "prompt_too_long", "oversized_request", "unservable_token_budget", "model_too_large":
+	case "context_exceeded", "oversized_request":
 		return "intrinsic_unservable"
-	case "no_provider", "no_eligible_provider":
+	case "no_provider", "no_eligible_provider", "prompt_too_long", "unservable_token_budget", "model_too_large":
 		return "no_eligible_provider"
 	default:
 		if status == http.StatusTooManyRequests {
@@ -163,8 +165,8 @@ func (d *autopilotDemandRequest) finish(status int, clientDeparted bool) (regist
 		sample.Reason = "client_departure"
 		return sample, true
 	}
-	sample.CapacityShed = status == http.StatusTooManyRequests &&
-		(sample.Reason == "capacity_shed" || sample.Reason == "deadline")
+	sample.CapacityShed = (status == http.StatusTooManyRequests || status == http.StatusServiceUnavailable) &&
+		(sample.Reason == "capacity_shed" || sample.Reason == "deadline" || sample.Reason == "no_eligible_provider")
 	if status >= 200 && status < 300 {
 		sample.Reason = "admitted"
 		observeAutopilotCompletion(&sample, d.profile)

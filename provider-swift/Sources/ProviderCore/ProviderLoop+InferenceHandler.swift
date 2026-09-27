@@ -459,7 +459,7 @@ extension ProviderLoop {
         // Authoritative autopilot check after all admission suspensions and
         // before request ownership is registered. Managed network work may use
         // warm models only; owner-local work retains its own load path.
-        if autopilotCommand != nil || (modelAutopilotEnabled && modelSlots[modelId] == nil) {
+        if !autopilotAllowsModel(modelId) || autopilotCommand != nil || (autopilotManagesResidency && modelSlots[modelId] == nil) {
             lookupReceiptFinalizer.sendTerminal(
                 .inferenceError(requestId: requestId,
                     failure: InferenceFailure(code: .capacity, statusCode: 503), profile: profile),

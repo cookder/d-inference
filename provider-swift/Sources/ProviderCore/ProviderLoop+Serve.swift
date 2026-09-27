@@ -272,6 +272,7 @@ extension ProviderLoop {
                     await coordinator.completeDrainAcknowledgement(id)
                 case .connected:
                     clearConnectionAuthorization()
+                    autopilotControl = nil
                     logger.info(.coordinatorConnected)
                     // The post-retirement reconnect's admission barrier
                     // (see `requestPlannedReconnect`) lifts with the new
@@ -282,6 +283,7 @@ extension ProviderLoop {
                 case .disconnected:
                     clearConnectionAuthorization()
                     modelSwitchTask?.cancel()
+                    autopilotControl = nil
                     cancelAppAttestShadow()
                     logger.warning(.coordinatorDisconnected)
                     // Cancel all in-flight requests on disconnect -- the coordinator
@@ -333,6 +335,8 @@ extension ProviderLoop {
                         logger.warning("  \(m.component): expected=\(m.expected), got=\(m.got)")
                     }
 
+                case .modelAutopilotControl(let control):
+                    await handleAutopilotControl(control)
                 case .modelAutopilot(let command):
                     handleModelAutopilot(command, send: send)
 

@@ -43,6 +43,10 @@ extension ProviderLoop {
     /// `.started` status is queued; the download runs on a low-priority task and
     /// never consumes a GPU slot or blocks inference.
     func handlePrefetchModelRequest(modelId: String, priority: Int, send: SendHandle) async {
+        guard autopilotAllowsModel(modelId) else {
+            send.send(.prefetchModelStatus(modelId: modelId, status: .failed, bytesDone: 0, bytesTotal: 0, error: "model_not_selected"))
+            return
+        }
         guard ModelRuntimeRequirements.isEligible(
             modelID: modelId, available: loopConfig.runtimeCapabilities)
         else {
@@ -296,6 +300,7 @@ extension ProviderLoop {
               selectionRevision == nil || selectionRevision == modelSelectionRevision else { return }
         modelAdvertisementsInFlight += 1
         defer { modelAdvertisementsInFlight -= 1 }
+        guard autopilotAllowsModel(modelId) else { return }
         if autopilotCommand != nil {
             reserveDeferredPrefetches.insert(modelId)
             return
@@ -414,7 +419,7 @@ extension ProviderLoop {
         // can act — the pending-load reservation fences competing KV
         // grants, not this. Defer through the desired-build backoff; the
         // load's install clears the marker well within the retry budget.
-        guard modelsLoading.isEmpty, autopilotCommand == nil else {
+        guard autopilotAllowsModel(modelId), modelsLoading.isEmpty, autopilotCommand == nil else {
             logger.info(
                 "Prefetch verified \(modelId) while a load is in flight (\(modelsLoading.sorted())); "
                     + "deferring the advertisement")
@@ -453,7 +458,7 @@ extension ProviderLoop {
         // bridge's grant): a load admitted during those hops passed its gate
         // against the pre-raise floor and is not in `modelSlots` yet, so the
         // preflight neither counted its weights nor covered its transient.
-        guard modelsLoading.isEmpty, autopilotCommand == nil else {
+        guard autopilotAllowsModel(modelId), modelsLoading.isEmpty, autopilotCommand == nil else {
             releaseResliceGate()
             logger.info(
                 "Prefetch verified \(modelId) but a load entered during the preflight; "
@@ -623,7 +628,7 @@ extension ProviderLoop {
         }
         let requestedDesired = Set(entries.map(\.desiredBuild).filter { !$0.isEmpty })
         let currentDesired = Set(requestedDesired.filter {
-            ModelRuntimeRequirements.isEligible(
+            autopilotAllowsModel($0) && ModelRuntimeRequirements.isEligible(
                 modelID: $0, available: loopConfig.runtimeCapabilities)
         })
         for stale in desiredPrefetchTargets.subtracting(currentDesired) {
@@ -635,7 +640,7 @@ extension ProviderLoop {
 
         for entry in entries {
             let desired = entry.desiredBuild
-            guard !desired.isEmpty else { continue }
+            guard !desired.isEmpty, autopilotAllowsModel(desired) else { continue }
             guard ModelRuntimeRequirements.isEligible(
                 modelID: desired, available: loopConfig.runtimeCapabilities)
             else {

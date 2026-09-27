@@ -52,6 +52,11 @@ extension ProviderLoop {
 
     /// One capacity-monitor tick, isolated on the loop actor.
     internal func capacityRefreshTick() async {
+        refreshAutopilotSettings()
+        if autopilotControl != nil && !modelAutopilotEnabled && autopilotCommand == nil {
+            autopilotControl = nil
+            startIdleMonitor()
+        }
         // Proactive trim of the MLX reclaimable buffer pool (DAR-338). Freed
         // KV/activation buffers otherwise sit in MLX's cache up to the cache
         // limit and are never returned to the OS — under sustained serving the

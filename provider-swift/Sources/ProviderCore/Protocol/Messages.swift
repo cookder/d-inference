@@ -1555,6 +1555,7 @@ public enum CoordinatorMessage: Sendable, Equatable {
     case appAttestShadow(AppAttestShadowPayload)
     case runtimeStatus(RuntimeStatus)
     case loadModel(LoadModel)
+    case modelAutopilotControl(ModelAutopilotControl)
     case modelAutopilot(ModelAutopilotCommand)
     case prefetchModel(PrefetchModel)
     case desiredModels(DesiredModels)
@@ -1753,6 +1754,7 @@ extension CoordinatorMessage: Codable {
         case appAttestShadow = "app_attest_shadow"
         case runtimeStatus = "runtime_status"
         case loadModel = "load_model"
+        case modelAutopilotControl = "model_autopilot_control"
         case modelAutopilot = "model_autopilot"
         case prefetchModel = "prefetch_model"
         case desiredModels = "desired_models"
@@ -1844,6 +1846,9 @@ extension CoordinatorMessage: Codable {
                 try container.encode(s.mismatches, forKey: .mismatches)
             }
 
+        case .modelAutopilotControl(let control):
+            try control.encode(to: encoder)
+            try container.encode(TypeValue.modelAutopilotControl, forKey: .type)
         case .modelAutopilot(let command):
             try command.encode(to: encoder)
             try container.encode(TypeValue.modelAutopilot, forKey: .type)
@@ -1962,6 +1967,8 @@ extension CoordinatorMessage: Codable {
                 mismatches: try container.decodeIfPresent([RuntimeMismatch].self, forKey: .mismatches) ?? []
             ))
 
+        case .modelAutopilotControl:
+            self = .modelAutopilotControl(try ModelAutopilotControl(from: decoder))
         case .modelAutopilot:
             self = .modelAutopilot(try ModelAutopilotCommand(from: decoder))
 

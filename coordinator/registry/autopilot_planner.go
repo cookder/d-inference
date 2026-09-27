@@ -7,140 +7,6 @@ import (
 	"time"
 )
 
-type autopilotCoverageView struct {
-	Ready, Future, Need map[string]float64
-	Warm                map[string]int
-	Contribution        map[string]map[string]float64
-	Reference           map[string]float64
-	Workload            map[string]autopilotDemandView
-}
-
-// A shared GPU contributes at most one machine's execution time. Residency is
-// not independent compute. Unqualified resident work can consume time, but it
-// must not receive useful capacity credit or hide a deadline-qualified deficit.
-func autopilotNodeContribution(n autopilotNode, residents []string, demand map[string]autopilotDemandView) map[string]float64 {
-	out := make(map[string]float64)
-	weights := make(map[string]float64)
-	total := 0.0
-	for _, model := range residents {
-		fit := n.Fits[model]
-		if !finiteAutopilotNonnegative(fit.Rate) || fit.Rate <= 0 {
-			continue
-		}
-		rate := demand[model].Rate
-		if !finiteAutopilotNonnegative(rate) {
-			rate = 0
-		}
-		weight := rate / fit.Rate
-		weights[model] = weight
-		total += weight
-	}
-	if total == 0 {
-		for model := range weights {
-			weights[model] = 1
-		}
-		total = float64(len(weights))
-	}
-	if total > 0 && finiteAutopilotNonnegative(total) {
-		for model, weight := range weights {
-			if n.Fits[model].MeetsDeadline {
-				out[model] = n.Fits[model].Rate * weight / total
-			}
-		}
-	}
-	return out
-}
-
-func autopilotCoverage(f autopilotFleet) autopilotCoverageView {
-	c := autopilotCoverageView{
-		Ready: map[string]float64{}, Future: map[string]float64{}, Need: map[string]float64{},
-		Warm: map[string]int{}, Contribution: map[string]map[string]float64{},
-		Reference: map[string]float64{}, Workload: map[string]autopilotDemandView{},
-	}
-	// Resolve once per model, not once per node/model (the fallback scans the
-	// fleet). One reference prices the same recovered work on every recipient.
-	models := make(map[string]bool)
-	for m := range f.Demand {
-		models[m] = true
-	}
-	for m := range f.Occupancy {
-		models[m] = true
-	}
-	for m := range f.Floors {
-		models[m] = true
-	}
-	for _, n := range f.Nodes {
-		for m := range n.Fits {
-			models[m] = true
-		}
-	}
-	for m := range models {
-		c.Reference[m] = autopilotReferenceService(f, m)
-	}
-	for m := range models {
-		d := f.Demand[m]
-		rate := d.Rate
-		if !finiteAutopilotNonnegative(rate) {
-			rate = 0
-		}
-		// Occupancy and offered-work estimates overlap. Use max, NEVER sum.
-		// Include occupancy-only models whose first logical terminal has not
-		// arrived yet, both in demand and in shared-GPU time allocation.
-		c.Need[m] = math.Max(rate, float64(max(0, f.Occupancy[m]))/c.Reference[m])
-		d.Rate = c.Need[m]
-		c.Workload[m] = d
-	}
-	for _, node := range f.Nodes {
-		if node.Pending {
-			future := node.Future
-			if node.FutureResidents != nil {
-				future = autopilotNodeContribution(node, node.FutureResidents, c.Workload)
-			}
-			for m, rate := range future {
-				if finiteAutopilotNonnegative(rate) {
-					c.Future[m] += rate
-				}
-			}
-			continue
-		}
-		contribution := autopilotNodeContribution(node, node.Residents, c.Workload)
-		c.Contribution[node.ID] = contribution
-		for model, rate := range contribution {
-			c.Ready[model] += rate
-			c.Warm[model]++
-		}
-	}
-	return c
-}
-
-func autopilotFloor(f autopilotFleet, model string) int {
-	floor := max(0, f.Floors[model])
-	d := f.Demand[model]
-	if d.Rate > 0 && (d.Requests >= 3 || d.CapacityShed > 0) {
-		floor = max(1, floor)
-	}
-	return floor
-}
-
-func autopilotDonorsProtected(f autopilotFleet, c autopilotCoverageView, n autopilotNode) bool {
-	// Loading fences the entire device, including retained co-residents. Debit
-	// every contribution for the whole transition; future capacity cannot protect
-	// a currently needed donor. Other commands are already absent from Ready.
-	for _, m := range n.Residents {
-		contribution, credited := c.Contribution[n.ID][m]
-		if !credited {
-			continue
-		} // no useful capacity was credited to this resident
-		if c.Warm[m]-1 < autopilotFloor(f, m) {
-			return false
-		}
-		if c.Ready[m]-contribution+1e-9 < c.Need[m] {
-			return false
-		}
-	}
-	return true
-}
-
 func autopilotVictims(n autopilotNode, model string, cfg AutopilotConfig) ([]string, bool) {
 	state := n.State
 	if state == nil || state.FreeForLoadNoEvictGB == nil || state.MaxModelSlots < 1 {
@@ -179,7 +45,7 @@ func autopilotVictims(n autopilotNode, model string, cfg AutopilotConfig) ([]str
 	var victims []string
 	for _, id := range ordered {
 		m := state.ResidentModels[byID[id]]
-		if slices.Contains(state.PinnedModels, id) || m.ResidentSeconds < dwell || m.IdleSeconds < dwell {
+		if slices.Contains(state.PinnedModels, id) || m.ResidentSeconds < dwell || m.IdleSeconds < math.Max(1, float64(state.MinIdleSeconds)) {
 			continue
 		}
 		victims = append(victims, id)
@@ -199,6 +65,13 @@ func planAutopilotAction(f autopilotFleet, cfg AutopilotConfig, now time.Time) *
 	c := autopilotCoverage(f)
 	reference := c.Reference
 	var best *autopilotAction
+	hasPlacementNeed := false
+	for key, need := range c.Need {
+		if need > c.Ready[key]+c.Future[key] || c.Warm[autopilotModel(key)] < autopilotFloor(f, autopilotModel(key)) {
+			hasPlacementNeed = true
+			break
+		}
+	}
 	models := make([]string, 0, len(c.Need))
 	for m := range c.Need {
 		models = append(models, m)
@@ -210,10 +83,15 @@ func planAutopilotAction(f autopilotFleet, cfg AutopilotConfig, now time.Time) *
 		}
 		for _, m := range models {
 			fit, eligible := n.Fits[m]
-			if !eligible || !fit.MeetsDeadline || fit.Rate <= 0 || slices.Contains(n.Residents, m) {
+			if !eligible || !fit.MeetsDeadline || fit.Rate <= 0 || slices.Contains(n.Residents, autopilotModel(m)) {
 				continue
 			}
-			floorShort := c.Warm[m] < autopilotFloor(f, m) && c.Future[m] == 0
+			floorShort := c.Warm[autopilotModel(m)] < autopilotFloor(f, autopilotModel(m)) && c.Future[m] == 0
+			bootstrap := !hasPlacementNeed && len(n.Residents) == 0 && n.State != nil && n.State.LastCommandID == "" && c.Future[m] == 0
+			floorShort = floorShort || bootstrap
+			if !floorShort && autopilotShapeLabel(m) != "" && !f.Demand[m].Sustained {
+				continue
+			}
 			gap := c.Need[m] - c.Ready[m] - c.Future[m]
 			if gap <= 0 && !floorShort {
 				continue
@@ -222,7 +100,7 @@ func planAutopilotAction(f autopilotFleet, cfg AutopilotConfig, now time.Time) *
 			if !ok {
 				continue
 			}
-			futureResidents := []string{m}
+			futureResidents := []string{autopilotModel(m)}
 			for _, old := range n.Residents {
 				if !slices.Contains(victims, old) {
 					futureResidents = append(futureResidents, old)
@@ -238,8 +116,8 @@ func planAutopilotAction(f autopilotFleet, cfg AutopilotConfig, now time.Time) *
 			if !fit.Measured {
 				cost += cfg.MinBenefitSeconds
 			}
-			for _, old := range n.Residents {
-				cost += c.Contribution[n.ID][old] * reference[old] * fit.LoadSeconds
+			for old, contribution := range c.Contribution[n.ID] {
+				cost += contribution * reference[old] * fit.LoadSeconds
 			}
 			if floorShort {
 				benefit = math.Max(benefit, cost+cfg.MinBenefitSeconds+fit.Rate)
@@ -257,8 +135,14 @@ func planAutopilotAction(f autopilotFleet, cfg AutopilotConfig, now time.Time) *
 			if benefit < cfg.MinBenefitSeconds {
 				continue
 			}
-			if best == nil || benefit > best.Benefit || (benefit == best.Benefit && n.ID < best.Node.ID) {
-				best = &autopilotAction{Node: n, Load: m, Unload: victims, Benefit: benefit, Future: future}
+			if best == nil || (len(victims) == 0 && len(best.Unload) > 0) || ((len(victims) == 0) == (len(best.Unload) == 0) && (benefit > best.Benefit || (benefit == best.Benefit && n.ID < best.Node.ID))) {
+				reason := "demand"
+				if bootstrap {
+					reason = "bootstrap"
+				} else if floorShort {
+					reason = "protected_floor"
+				}
+				best = &autopilotAction{Workload: m, Reason: reason, Node: n, Load: autopilotModel(m), Unload: victims, Benefit: benefit, Future: future}
 			}
 		}
 	}
@@ -266,13 +150,13 @@ func planAutopilotAction(f autopilotFleet, cfg AutopilotConfig, now time.Time) *
 		return best
 	}
 	for _, n := range f.Nodes {
-		if !n.Managed || !n.Idle || n.Pending || n.State == nil || !finiteAutopilotNonnegative(n.MemoryPressure) || n.MemoryPressure < .8 || !autopilotDonorsProtected(f, c, n) {
+		if !n.Managed || !n.Idle || n.Pending || n.State == nil || !finiteAutopilotNonnegative(n.MemoryPressure) || !autopilotDonorsProtected(f, c, n) {
 			continue
 		}
 		var victims []string
 		for _, m := range n.State.ResidentModels {
-			d := f.Demand[m.ModelID]
-			if d.Rate > 0 || (!d.LastDemand.IsZero() && now.Sub(d.LastDemand) < cfg.IdleUnloadAfter) || slices.Contains(n.State.PinnedModels, m.ModelID) || m.ResidentSeconds < math.Max(cfg.MinDwell.Seconds(), float64(n.State.MinDwellSeconds)) || m.IdleSeconds < math.Max(cfg.IdleUnloadAfter.Seconds(), float64(n.State.MinDwellSeconds)) {
+			d := autopilotDemandForModel(f.Demand, m.ModelID)
+			if d.Rate > 0 || (!d.LastDemand.IsZero() && now.Sub(d.LastDemand) < cfg.IdleUnloadAfter) || slices.Contains(n.State.PinnedModels, m.ModelID) || m.ResidentSeconds < math.Max(cfg.MinDwell.Seconds(), float64(n.State.MinDwellSeconds)) || m.IdleSeconds < math.Max(cfg.IdleUnloadAfter.Seconds(), float64(n.State.MinIdleSeconds)) {
 				continue
 			}
 			victims = append(victims, m.ModelID)
@@ -284,7 +168,7 @@ func planAutopilotAction(f autopilotFleet, cfg AutopilotConfig, now time.Time) *
 					retained = append(retained, m)
 				}
 			}
-			return &autopilotAction{Node: n, Unload: victims, Future: autopilotNodeContribution(n, retained, c.Workload)}
+			return &autopilotAction{Reason: "idle_surplus", Node: n, Unload: victims, Future: autopilotNodeContribution(n, retained, c.Workload)}
 		}
 	}
 	return nil

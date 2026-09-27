@@ -188,3 +188,22 @@ func TestAutopilotDemandDisabledLeavesExistingProfilerBehavior(t *testing.T) {
 		t.Fatal("disabled controller enabled profiling")
 	}
 }
+
+func TestAutopilotSupplyRefusalsRemainOfferedDemand(t *testing.T) {
+	for _, reason := range []string{"prompt_too_long", "unservable_token_budget", "model_too_large"} {
+		if got := autopilotTerminalReason(reason, 429); got != "no_eligible_provider" {
+			t.Fatalf("%s became %s", reason, got)
+		}
+	}
+	if got := autopilotTerminalReason("context_exceeded", 400); got != "intrinsic_unservable" {
+		t.Fatal(got)
+	}
+}
+
+func TestAutopilotFirstSupplyRefusalCanRestoreQuietModelCoverage(t *testing.T) {
+	d := &autopilotDemandRequest{armed: true, reason: "no_eligible_provider", sample: registry.AutopilotDemandSample{Model: "cached", PromptTokens: 64, RequestedMaxTokens: 64}}
+	sample, ok := d.finish(429, false)
+	if !ok || !sample.CapacityShed {
+		t.Fatal("a quiet model cannot recover from its first qualified supply refusal")
+	}
+}

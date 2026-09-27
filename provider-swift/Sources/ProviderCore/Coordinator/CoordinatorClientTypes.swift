@@ -123,6 +123,7 @@ public enum CoordinatorEvent: Sendable {
     /// (off-thread) and reply with a `loadModelStatus` outbound message
     /// when the load completes or fails.
     case loadModel(modelId: String)
+    case modelAutopilotControl(ModelAutopilotControl)
     case modelAutopilot(ModelAutopilotCommand)
     /// Coordinator-driven background prefetch. Provider should download +
     /// verify the build on disk (off-thread, no GPU load) and reply with
