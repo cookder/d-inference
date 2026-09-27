@@ -30,6 +30,8 @@ Use with compatible protocol-2 coordinator and provider releases. See the
 2. Run `darkbloom autopilot status`. Confirm the selected set and live `active`
    state. `waiting` means consent exists but a coordinator lease is unavailable.
    Cached inventory is not proof of ready capacity.
+   Freshness follows the configured heartbeat interval, so an intentionally
+   slower daemon refresh does not appear as a missing live report.
 3. Use `darkbloom autopilot pin MODEL_ID` to protect a selected model. Use `unpin`
    to remove that protection. Changes are applied at the next capacity poll;
    status reports a configuration revision waiting to apply when appropriate.
@@ -40,7 +42,7 @@ Use with compatible protocol-2 coordinator and provider releases. See the
 5. Inspect authenticated `GET /v1/admin/autopilot`. It returns controller summary
    and up to 200 ledger events from the last 24 hours. Compare planned benefit
    with terminal capacity and request outcomes. Provider status includes local
-   ready models and latest transition result.
+   resident models and latest transition result.
 
 Coordinator defaults accept opted-in providers in active mode. The action and
 operation bounds are in [configuration](../reference/configuration.md#model-autopilot).

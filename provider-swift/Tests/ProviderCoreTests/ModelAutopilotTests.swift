@@ -307,3 +307,51 @@ extension ModelAutopilotRuntimeTests {
         await loop.releaseManualModelSwitchForAutopilotTesting()
     }
 }
+
+private extension ProviderLoop {
+    func expireAutopilotControlForTesting() { autopilotControl?.expiresAtMs = 1 }
+    func pauseAutopilotForTesting() {
+        var settings = autopilotSettings
+        settings.paused = true
+        autopilotSettingsOverride = settings
+    }
+}
+
+extension ModelAutopilotRuntimeTests {
+    @Test(arguments: [false, true])
+    func lostControlRestoresIdleTimerWithoutAbandoningAcceptedCommand(expired: Bool) async throws {
+        let loop = try await autopilotTestLoop(enabled: true)
+        await loop.startIdleMonitor()
+        #expect(await loop.idleMonitorTask == nil)
+        let command = ModelAutopilotCommand(commandId: "accepted", loadModelId: "target", expiresAtMs: 1)
+        await loop.installAutopilotTransitionForTest(command)
+        if expired { await loop.expireAutopilotControlForTesting() }
+        await loop.clearAutopilotControl()
+        let timer = await loop.idleMonitorTask
+        #expect(timer != nil)
+        #expect(await loop.autopilotControl == nil)
+        #expect(await loop.autopilotCommand?.commandId == "accepted")
+        #expect(await loop.autopilotPhase == "recovering")
+        timer?.cancel()
+        await loop.installAutopilotTransitionForTest(nil)
+    }
+
+    @Test func disabledRenewalAfterExpiryRestoresIdleTimer() async throws {
+        let loop = try await autopilotTestLoop(enabled: true)
+        await loop.startIdleMonitor()
+        await loop.expireAutopilotControlForTesting()
+        await loop.handleAutopilotControl(.init(sessionId: "session", revision: "test", enabled: false, expiresAtMs: 1))
+        let timer = await loop.idleMonitorTask
+        #expect(timer != nil)
+        #expect(await loop.autopilotPhase == "waiting")
+        timer?.cancel()
+    }
+
+    @Test func lostControlPreservesExplicitPause() async throws {
+        let loop = try await autopilotTestLoop(enabled: true)
+        await loop.pauseAutopilotForTesting()
+        await loop.clearAutopilotControl()
+        #expect(await loop.idleMonitorTask == nil)
+        #expect(await loop.autopilotPhase == "paused")
+    }
+}

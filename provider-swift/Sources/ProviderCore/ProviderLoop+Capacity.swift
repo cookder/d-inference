@@ -54,8 +54,7 @@ extension ProviderLoop {
     internal func capacityRefreshTick() async {
         refreshAutopilotSettings()
         if autopilotControl != nil && !modelAutopilotEnabled && autopilotCommand == nil {
-            autopilotControl = nil
-            startIdleMonitor()
+            clearAutopilotControl()
         }
         // Proactive trim of the MLX reclaimable buffer pool (DAR-338). Freed
         // KV/activation buffers otherwise sit in MLX's cache up to the cache

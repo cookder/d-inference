@@ -101,7 +101,7 @@ func (c *modelAutopilotController) tick(now time.Time) AutopilotSummary {
 	c.tickMu.Lock()
 	defer c.tickMu.Unlock()
 	ledgerReady := c.registry.flushAutopilotEvents()
-	c.refreshControlLeases(now)
+	c.refreshControlLeases(time.Now())
 	if !c.config.ObserveOnly {
 		c.registry.markAutopilotWatchdogs(c.config, now)
 		c.registry.retryAutopilotCommands(now)

@@ -55,6 +55,9 @@ Protocol 2 separates `enabled` consent from `active` control. The coordinator
 sends `model_autopilot_control` with its connection ID, the approved configuration
 revision, and an expiry of three controller intervals plus ten seconds. Only a
 matching acknowledged lease transfers normal network cold-load/idle ownership.
+Renewals enqueue without waiting on sockets through each connection's bounded
+priority lane. A full queue does not extend that provider's coordinator lease;
+slow connections cannot serialize renewal of healthy peers or the planning tick.
 Absent or expired control restores ordinary serving policy. An explicitly paused
 provider retains its resident set and accepts network work only on ready models.
 An accepted operation retains ownership until it finishes even after opt-out,
@@ -64,6 +67,8 @@ The local diagnostic phases are `off`, `waiting`, `active`, `paused`,
 `transitioning`, and `recovering`. `darkbloom autopilot status` distinguishes
 configured and live state. The account provider endpoint includes the live
 snapshot; the admin endpoint exposes controller status and recent operations.
+CLI freshness allows four configured half-heartbeat writes, with a ten-second
+minimum, matching the other daemon diagnostics.
 
 ### Demand and placement
 
@@ -120,6 +125,8 @@ actual resident sets, predicted benefit and measured durations. Intent must be
 persisted before dispatch. Ledger failure suspends new operations while pending
 outcomes remain queued for retry. Existing request-outcome records provide the
 completion and first-content evidence for comparisons by model/shape/window.
+A command proven not to have entered the writer queue records a failed terminal
+phase with unchanged residency. A failed retry cannot erase uncertain delivery.
 No causal improvement is inferred from command success alone.
 
 ## Invariants
@@ -136,6 +143,8 @@ No causal improvement is inferred from command success alone.
 
 A failed setup preserves the running provider and its prior consent. A lost
 controller lease restores ordinary policy after any accepted operation finishes.
+Disconnect and expired-control revocation re-arm the saved idle monitor; its
+ticks continue to defer to accepted commands and an explicit provider pause.
 A failed target load may leave fewer residents; the terminal heartbeat reports
 that actual state. An ambiguous operation stays fenced until reconciled.
 After a coordinator restart, provider registration and paired capacity rebuild

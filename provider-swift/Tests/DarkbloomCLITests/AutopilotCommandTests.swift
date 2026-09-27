@@ -73,4 +73,13 @@ extension AutopilotCommandTests {
         start.autopilot = true
         #expect(throws:(any Error).self) { try start.resolveAutopilotChoice(config) }
     }
+
+    @Test func statusFreshnessFollowsConfiguredHeartbeatCadence() {
+        let state = DaemonState(pid: 1, version: "test", writtenAt: 1_000, startedAt: 900)
+        #expect(Autopilot.Status.snapshotIsFresh(state, heartbeatIntervalSecs: 60, now: 1_030.5))
+        #expect(!Autopilot.Status.snapshotIsFresh(state, heartbeatIntervalSecs: 60, now: 1_121))
+        #expect(Autopilot.Status.snapshotIsFresh(state, heartbeatIntervalSecs: 200, now: 1_100.5))
+        #expect(!Autopilot.Status.snapshotIsFresh(state, heartbeatIntervalSecs: 200, now: 1_401))
+        #expect(!Autopilot.Status.snapshotIsFresh(state, heartbeatIntervalSecs: 5, now: 1_011))
+    }
 }

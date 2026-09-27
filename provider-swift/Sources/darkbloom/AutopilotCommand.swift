@@ -17,7 +17,9 @@ struct Autopilot: AsyncParsableCommand {
             let runtime = try loadRuntimeSnapshot(configOptions: configOptions)
             let settings = runtime.config.backend.modelAutopilot
             let live = DaemonStateFile.read()
-            let fresh = live.map { daemonProcessAlive(pid: $0.pid) && Date().timeIntervalSince1970 - $0.writtenAt < 30 } ?? false
+            let fresh = live.map { daemonProcessAlive(pid: $0.pid) && Self.snapshotIsFresh($0,
+                heartbeatIntervalSecs: runtime.config.coordinator.heartbeatIntervalSecs,
+                now: Date().timeIntervalSince1970) } ?? false
             if json {
                 try printJSON(AutopilotStatusOutput(configured: settings, live: fresh ? live?.autopilot : nil,
                     phase: fresh ? live?.autopilotPhase : nil, operation: fresh ? live?.autopilotOperation : nil))
@@ -41,6 +43,11 @@ struct Autopilot: AsyncParsableCommand {
             }
             print("  Pause/resume: darkbloom autopilot pause | resume")
             print("  Change selection: darkbloom autopilot models")
+        }
+
+        static func snapshotIsFresh(_ state: DaemonState, heartbeatIntervalSecs: UInt64, now: Double) -> Bool {
+            !state.isStale(now: now, maxAge: KVBackendPosture.staleAfterSeconds(
+                heartbeatIntervalSecs: heartbeatIntervalSecs))
         }
     }
 

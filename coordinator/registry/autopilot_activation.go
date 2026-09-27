@@ -53,8 +53,6 @@ func (c *modelAutopilotController) refreshControlLeases(now time.Time) {
 			if !active {
 				expiry = now
 			}
-			p.autopilotControlUntil = expiry
-			p.autopilotControlRevision = p.ModelAutopilot.Revision
 			pending = append(pending, delivery{p, protocol.ModelAutopilotControl{
 				Type: protocol.TypeModelAutopilotControl, SessionID: p.ID,
 				Revision: p.ModelAutopilot.Revision, Enabled: active, ExpiresAtMS: expiry.UnixMilli(),
@@ -68,8 +66,18 @@ func (c *modelAutopilotController) refreshControlLeases(now time.Time) {
 		if err != nil {
 			continue
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), providerControlWriteTimeout)
-		_ = d.p.WriteTextControl(ctx, body)
-		cancel()
+		// Renewals are best-effort control state, acknowledged by a matching
+		// provider heartbeat. The existing bounded priority lane and per-socket
+		// watchdog isolate slow peers without serial wire waits in this tick.
+		// Full queues retain the previous lease; expiry restores ordinary policy.
+		if err := d.p.EnqueueText(context.Background(), body); err != nil {
+			continue
+		}
+		d.p.mu.Lock()
+		if providerAutopilotConsentedLocked(d.p) && d.p.ModelAutopilot.Revision == d.message.Revision {
+			d.p.autopilotControlUntil = time.UnixMilli(d.message.ExpiresAtMS)
+			d.p.autopilotControlRevision = d.message.Revision
+		}
+		d.p.mu.Unlock()
 	}
 }

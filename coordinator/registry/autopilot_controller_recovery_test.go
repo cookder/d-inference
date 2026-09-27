@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"context"
 	"errors"
 	"math"
 	"reflect"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/eigeninference/d-inference/coordinator/protocol"
+	"github.com/eigeninference/d-inference/coordinator/store"
 )
 
 func TestAutopilotControllerPendingFutureLosesCreditWhenRecipientStopsQualifying(t *testing.T) {
@@ -108,6 +110,26 @@ func TestAutopilotControllerOnlyInitialProvenQueueFullReleasesReservation(t *tes
 			}
 			if !retry && (pending != nil || !backoff.After(now)) {
 				t.Fatalf("initial unqueued command should release with backoff: pending=%+v backoff=%v", pending, backoff)
+			}
+			if !reg.flushAutopilotEvents() {
+				t.Fatal("ledger flush failed")
+			}
+			ledger, _ := store.As[store.AutopilotStore](reg.store)
+			records, err := ledger.AutopilotRecords(context.Background(), now.Add(-time.Minute), 100)
+			if err != nil {
+				t.Fatal(err)
+			}
+			failed := 0
+			for _, record := range records {
+				if record.Phase == "failed" {
+					failed++
+					if !slices.Equal(record.Before, record.After) {
+						t.Fatal("proven-unsent command changed ledger residency")
+					}
+				}
+			}
+			if (!retry && failed != 1) || (retry && failed != 0) {
+				t.Fatalf("failed terminal count=%d retry=%v", failed, retry)
 			}
 		})
 	}

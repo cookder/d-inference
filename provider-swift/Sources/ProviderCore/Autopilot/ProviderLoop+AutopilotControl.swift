@@ -31,6 +31,17 @@ extension ProviderLoop {
         !autopilotSettings.enabled || autopilotSettings.allows(id)
     }
 
+    /// Connection loss and lease expiry both restore the saved idle policy.
+    /// The idle tick still defers to accepted commands; explicit pause retains
+    /// residency ownership even while the coordinator is unavailable.
+    func clearAutopilotControl() {
+        guard autopilotControl != nil else { return }
+        autopilotControl = nil
+        autopilotGeneration &+= 1
+        startIdleMonitor()
+        publishModelAutopilotSnapshot()
+    }
+
     /// Only the daemon started with this config path reads live policy changes.
     /// Tests and embedded loops with no path never read the user's config.
     func refreshAutopilotSettings() {
@@ -39,12 +50,13 @@ extension ProviderLoop {
         let settings = config.backend.modelAutopilot
         guard settings != autopilotSettings else { return }
         let previouslyManaged = autopilotManagesResidency
+        let hadControl = autopilotControl != nil
         autopilotSettingsOverride = settings
         autopilotControl = nil
         autopilotGeneration &+= 1
         // Disabling / pausing does not cancel an accepted mutation. Its owner
         // finishes and publishes actual capacity before ordinary changes resume.
-        if previouslyManaged != autopilotManagesResidency { startIdleMonitor() }
+        if hadControl || previouslyManaged != autopilotManagesResidency { startIdleMonitor() }
         publishModelAutopilotSnapshot()
     }
 
@@ -57,11 +69,11 @@ extension ProviderLoop {
         let previouslyManaged = autopilotManagesResidency
         if control.enabled && control.expiresAtMs > now && !autopilotSettings.paused {
             autopilotControl = control
+            autopilotGeneration &+= 1
+            if previouslyManaged != autopilotManagesResidency { startIdleMonitor() }
         } else {
-            autopilotControl = nil
+            clearAutopilotControl()
         }
-        autopilotGeneration &+= 1
-        if previouslyManaged != autopilotManagesResidency { startIdleMonitor() }
         await updateAggregateCapacity()
         await coordinatorClient?.sendEventHeartbeat()
         writeDaemonState()

@@ -89,6 +89,9 @@ func (r *Registry) sendAutopilotCommand(p *Provider, command protocol.ModelAutop
 		p.mu.Lock()
 		if pending := p.autopilotPending; pending != nil && pending.Command.CommandID == command.CommandID {
 			if errors.Is(err, ErrProviderWriterQueueFull) && pending.Attempts == 1 && pending.Status == "reserved" && !pending.Uncertain {
+				r.queueAutopilotEvent(store.AutopilotRecord{CommandID: command.CommandID, At: time.Now(), ProviderID: p.ID,
+					Phase: "failed", Load: command.LoadModelID, Unload: command.UnloadModelIDs,
+					Before: command.ExpectedResidentModels, After: command.ExpectedResidentModels})
 				p.autopilotBackoffUntil = time.Now().Add(pending.FailureBackoff)
 				p.autopilotPending = nil // the writer proved this command was never enqueued
 			} else {
