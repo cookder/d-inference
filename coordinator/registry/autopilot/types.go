@@ -50,6 +50,7 @@ type ModelSummary struct {
 	Shape           string  `json:"shape,omitempty"`
 	Model           string  `json:"model"`
 	LogicalRequests int     `json:"logical_requests"`
+	QueuedRequests  int     `json:"queued_requests"`
 	OfferedRPS      float64 `json:"offered_rps"`
 	CapacityRPS     float64 `json:"capacity_rps"`
 	PendingRPS      float64 `json:"pending_rps"`

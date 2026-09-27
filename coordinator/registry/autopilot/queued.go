@@ -1,0 +1,36 @@
+package autopilot
+
+import "maps"
+
+// WithQueuedDemand projects current qualified waiters into the same cohorts as
+// terminal demand. It never increments logical arrivals or persists queue data.
+// The caller passes only public, unrestricted, live requests without content.
+func WithQueuedDemand(history map[string]DemandView, queued []DemandSample) map[string]DemandView {
+	out := maps.Clone(history)
+	if out == nil {
+		out = map[string]DemandView{}
+	}
+	for _, sample := range queued {
+		if !validDemandEnvelope(sample) || sample.FirstContentDeadline < 0 {
+			continue
+		}
+		key := ShapeKey(sample)
+		d := out[key]
+		d.Requirements = sample.Requirements
+		d.Queued++
+		d.PromptTokens = max(d.PromptTokens, sample.PromptTokens)
+		d.TailPromptTokens = max(d.TailPromptTokens, sample.PromptTokens)
+		d.RequestedMaxTokens = max(d.RequestedMaxTokens, sample.RequestedMaxTokens)
+		d.OutputTokens = max(d.OutputTokens, sample.RequestedMaxTokens)
+		deadline := sample.FirstContentDeadline.Seconds()
+		if sample.DeadlineKnown && (!d.DeadlineKnown || d.Queued == 1 && d.Requests == 0 || deadline < d.DeadlineSeconds) {
+			d.DeadlineSeconds = deadline
+		}
+		d.DeadlineKnown = sample.DeadlineKnown
+		if sample.ReceivedAt.After(d.LastDemand) {
+			d.LastDemand = sample.ReceivedAt
+		}
+		out[key] = d
+	}
+	return out
+}

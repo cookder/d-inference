@@ -847,7 +847,7 @@ extension ProviderLoop {
     @discardableResult
     internal func unloadModel(_ modelId: String, forEviction: Bool = false, autopilotCommandId: String? = nil) async -> Bool {
         await waitForMTPUpgrade(modelId)
-        if forEviction && autopilotConsented && autopilotPinnedModels.contains(modelId) { return false }
+        if forEviction && autopilotProtectsPins && autopilotPinnedModels.contains(modelId) { return false }
         // An idle/eviction candidate may have been captured before the
         // autopilot transaction reserved this box. Only its explicit victims
         // may be removed until the transaction settles.
@@ -1028,10 +1028,10 @@ extension ProviderLoop {
     /// One actor-local eviction snapshot shared by slot-cap, memory-load and
     /// pre-accept admission decisions. Callers still recheck after suspension;
     /// unloadModel(forEviction:) is the authoritative final gate.
-    private func evictableModelSlots() -> [String: ModelSlot] {
+    internal func evictableModelSlots() -> [String: ModelSlot] {
         let modelsWithInflight = Set(requestToModel.values)
         return modelSlots.filter {
-            !(autopilotConsented && autopilotPinnedModels.contains($0.key))
+            !(autopilotProtectsPins && autopilotPinnedModels.contains($0.key))
                 && !modelsWithInflight.contains($0.key)
                 && !hasLocalReservation($0.key)
                 && !modelsUnloading.contains($0.key)

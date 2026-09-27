@@ -1,6 +1,6 @@
 # HTTP API contracts
 
-> Last updated: 2026-09-27 · commit `78725b45b`
+> Last updated: 2026-09-27 · commit `f8c8d30ac`
 
 The complete public HTTP surface of the coordinator, derived from the 117 `HandleFunc` registrations in `routes()` (`coordinator/api/server.go`), including the `/v1/` catch-all. Every route is listed once below with its handler symbol, authentication requirement, and rate-limit bucket; the second half of the page gives the wire shapes, headers, error table, SSE framing, limits, timeouts, and version-gate semantics that those routes share. For *why* the pipeline is built this way see [`../architecture/components/consumer.md`](../architecture/components/consumer.md); for the crypto model behind sealed transport see [`../architecture/security/encryption.md`](../architecture/security/encryption.md).
 
@@ -834,7 +834,8 @@ Inference returns `402 free_tokens_exhausted` when the claimed allowance is exha
 
 ## Experimental model Autopilot
 
-Source: `coordinator/api/autopilot_handlers.go` (`handleAdminAutopilot`),
+Source: `coordinator/api/autopilot/handler.go` (`Handler.ServeHTTP`),
+authenticated adapter `coordinator/api/autopilot_handlers.go` (`handleAdminAutopilot`),
 `coordinator/api/me_handlers.go` (`handleMyProviders`).
 
 | Endpoint | Authorization | Result |
@@ -842,6 +843,10 @@ Source: `coordinator/api/autopilot_handlers.go` (`handleAdminAutopilot`),
 | `GET /v1/admin/autopilot` | Admin key or authenticated admin | Controller summary and up to 200 durable events in the last 24 hours; ledger read failure returns 503 |
 | `POST /v1/admin/autopilot` | Admin key or authenticated admin | Required JSON `{ "paused": true }` stops new reservations; `false` resumes. Existing operations continue reconciliation. Missing/invalid input returns 400; unavailable controller returns 409; successful mutation returns the summary independently of ledger availability |
 | `GET /v1/me/providers` | Provider owner | Optional `model_autopilot` live snapshot with consent, exact selected models, active/paused state and last operation |
+
+Each model summary separates completed logical observations (`logical_requests`)
+from current qualified public queue occupancy (`queued_requests`). Queue snapshots
+do not increment arrival history.
 
 The operator pause lasts for the current coordinator process. Intent is persisted
 before dispatch. Ledger read/write errors are not success or rollback evidence.

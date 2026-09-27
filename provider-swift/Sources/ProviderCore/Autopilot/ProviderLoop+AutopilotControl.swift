@@ -13,6 +13,12 @@ extension ProviderLoop {
         modelAutopilotEnabled || (autopilotConsented && autopilotSettings.paused)
     }
 
+    /// Pins belong to live residency control, an explicit pause, or an accepted
+    /// operation. Saved consent alone must not block the restored idle policy.
+    var autopilotProtectsPins: Bool {
+        autopilotManagesResidency || autopilotCommand != nil
+    }
+
     var autopilotOperationView: DaemonState.AutopilotOperation? {
         let last = autopilotLastCommandId.flatMap { autopilotHistory[$0]?.0 }
         guard let command = autopilotCommand ?? last else { return nil }

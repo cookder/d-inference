@@ -1,6 +1,6 @@
 # Experimental model Autopilot
 
-> Last updated: 2026-09-27 · commit `3030474d7`
+> Last updated: 2026-09-27 · commit `f8c8d30ac`
 
 Autopilot manages memory residency for an explicitly selected set of provider
 models. Provider enrollment defaults to off. After selection and verification,
@@ -70,8 +70,9 @@ providers. A fresh liveness-only frame never refreshes an old capacity sample.
 Before coordinator activation, the ordinary startup preloader warms selected
 models within the slot and memory limits. Autopilot rejects commands while that
 preloader is still running; it takes over only after the startup owner finishes.
-Absent or expired control restores ordinary serving policy. An explicitly paused
-provider retains its resident set and accepts network work only on ready models.
+Absent or expired control restores ordinary serving policy. Pins apply while control, explicit pause or an accepted operation owns residency.
+Recorded consent alone does not block ordinary idle or load-driven eviction.
+An explicitly paused provider retains its resident set and accepts network work only on ready models.
 An accepted operation retains ownership until it finishes even after opt-out,
 pause, connection loss or lease expiry; newer commands cannot overlap it.
 
@@ -103,6 +104,14 @@ prompts, tool names, soft retry preferences or consumer identities. Ordinary wor
 least eight observations over three occupied ten-second buckets. Initial
 bootstrap and protected-floor repairs may act sooner. Shape-specific eligibility
 prevents a specialized request from excluding a provider from ordinary traffic.
+Current public, unrestricted queue entries are projected into these same cohorts
+before placement, including remaining first-content allowance. Cancelled, expired,
+owner/prefer-owner and provider-restricted entries are excluded. Queue counts are
+an ephemeral occupancy lower bound and never add logical arrivals to the tracker.
+Queued work can justify an immediate compatible placement without waiting for its
+first terminal observation. Active slot occupancy is shared once across cohorts;
+it is combined with queue occupancy and compared with offered work using `max`.
+Admin model summaries expose the separate `queued_requests` count.
 
 `autopilot.NodeContribution` divides one machine's execution capacity among its
 resident workloads. The planner combines offered work and live occupancy with

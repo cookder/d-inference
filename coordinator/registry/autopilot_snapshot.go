@@ -21,6 +21,9 @@ func (r *Registry) autopilotFleetSnapshot(c *modelAutopilotController, now time.
 // runs under these locks. Reservation calls this with r.mu exclusive so donor
 // protection is recalculated against current, not stale proposed, placements.
 func (r *Registry) autopilotFleetSnapshotLocked(c *modelAutopilotController, demand map[string]autopilot.DemandView, now time.Time) autopilotFleet {
+	if r.queue != nil {
+		demand = autopilot.WithQueuedDemand(demand, r.queue.autopilotSamples(now))
+	}
 	byModel := make(map[string]map[string]autopilot.DemandView)
 	for key, d := range demand {
 		model := autopilot.ModelID(key)
@@ -124,11 +127,6 @@ func (r *Registry) autopilotFleetSnapshotLocked(c *modelAutopilotController, dem
 		p.mu.Unlock()
 		f.Nodes = append(f.Nodes, n)
 	}
-	if r.queue != nil {
-		for _, m := range r.queue.QueuedModels() {
-			f.Occupancy[m] += r.queue.QueueSize(m)
-		}
-	}
 	// Stable traversal makes equal-score decisions reproducible.
 	slices.SortFunc(f.Nodes, func(a, b autopilot.Node) int {
 		if a.ID < b.ID {
@@ -155,7 +153,7 @@ func (r *Registry) autopilotModelFitLocked(p *Provider, model string, d autopilo
 		return autopilot.ModelFit{}
 	}
 	prompt, output := max(1, d.PromptTokens), max(1, d.OutputTokens)
-	if d.Requests == 0 {
+	if d.Requests == 0 && d.Queued == 0 {
 		prompt = 512
 		output = 256
 	}
@@ -227,7 +225,7 @@ func (r *Registry) autopilotModelFitLocked(p *Provider, model string, d autopilo
 		maxOutput = 256
 	}
 	envelope := int64(tail) + int64(maxOutput)
-	if d.Requests > 0 && (budget <= 0 || envelope > budget) {
+	if (d.Requests > 0 || d.Queued > 0) && (budget <= 0 || envelope > budget) {
 		fit.MeetsDeadline = false
 	}
 	return fit

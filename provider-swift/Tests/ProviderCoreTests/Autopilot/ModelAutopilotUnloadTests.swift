@@ -24,6 +24,21 @@ private extension ProviderLoop {
         if superseded { autopilotSupersededModels.insert(model); advertisedModels.removeValue(forKey: model) }
         publishModelAutopilotSnapshot()
     }
+    func configurePinOwnershipForTest(_ state: String) {
+        if state == "waiting" || state == "accepted" { clearAutopilotControl() }
+        if state == "expired" { autopilotControl?.expiresAtMs = 1 }
+        if state == "paused" || state == "disabled" {
+            var settings = autopilotSettings
+            settings.paused = state == "paused"
+            settings.enabled = state != "disabled"
+            autopilotSettingsOverride = settings
+        }
+        if state == "accepted" {
+            autopilotCommand = .init(commandId: "accepted", loadModelId: "keep", expiresAtMs: 1)
+        }
+        idleMonitorTask?.cancel()
+        idleMonitorTask = nil
+    }
     func autopilotLoadedIDs() -> [String] { modelSlots.keys.sorted() }
     func unadvertiseWithoutReleaseForTest(_ model: String) { advertisedModels.removeValue(forKey: model) }
 }
@@ -63,6 +78,16 @@ struct ModelAutopilotUnloadTests {
             await loop.markAutopilotResidentOld(model)
         }
         return (loop, engines)
+    }
+
+    @Test(arguments: ["active", "paused", "waiting", "expired", "disabled", "accepted"])
+    func pinsFollowResidencyOwnership(state: String) async throws {
+        let (loop, engines) = try await fixture(pins: ["old"])
+        await loop.configurePinOwnershipForTest(state)
+        let ordinaryPolicy = ["waiting", "expired", "disabled"].contains(state)
+        #expect(await loop.evictableModelSlots().keys.contains("old") == ordinaryPolicy)
+        #expect(await loop.unloadModel("old", forEviction: true) == ordinaryPolicy)
+        #expect(engines["old"]?.shutdownCalls == (ordinaryPolicy ? 1 : 0))
     }
 
     @Test func explicitUnloadTouchesOnlyDeclaredVictim() async throws {

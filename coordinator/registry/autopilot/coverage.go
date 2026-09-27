@@ -64,12 +64,12 @@ func Coverage(f Fleet) CoverageView {
 		models[m] = true
 	}
 	for m := range f.Occupancy {
-		if demandForModel(f.Demand, m).Rate == 0 {
+		if !hasDemandForModel(f.Demand, m) {
 			models[m] = true
 		}
 	}
 	for m := range f.Floors {
-		if demandForModel(f.Demand, m).Rate == 0 {
+		if !hasDemandForModel(f.Demand, m) {
 			models[m] = true
 		}
 	}
@@ -90,7 +90,8 @@ func Coverage(f Fleet) CoverageView {
 		// Occupancy and offered-work estimates overlap. Use max, NEVER sum.
 		// Include occupancy-only models whose first logical terminal has not
 		// arrived yet, both in demand and in shared-GPU time allocation.
-		c.Need[m] = math.Max(rate, float64(max(0, f.Occupancy[ModelID(m)]))*autopilotDemandShare(f, m)/c.Reference[m])
+		active := float64(max(0, f.Occupancy[ModelID(m)])) * autopilotDemandShare(f, m)
+		c.Need[m] = math.Max(rate, (active+float64(max(0, d.Queued)))/c.Reference[m])
 		d.Rate = c.Need[m]
 		c.Workload[m] = d
 	}

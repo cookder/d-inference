@@ -36,7 +36,7 @@ func Summarize(f Fleet, cfg Config, now time.Time) Summary {
 				eligible++
 			}
 		}
-		s.Models = append(s.Models, ModelSummary{Model: ModelID(m), Shape: ShapeLabel(m), LogicalRequests: f.Demand[m].Requests, OfferedRPS: f.Demand[m].Rate, CapacityRPS: coverage.Ready[m], PendingRPS: coverage.Future[m], ProtectedFloor: floor(f, ModelID(m)), WarmProviders: coverage.Warm[ModelID(m)], EligibleIdle: eligible, DeficitRPS: max(0, coverage.Need[m]-coverage.Ready[m]-coverage.Future[m])})
+		s.Models = append(s.Models, ModelSummary{Model: ModelID(m), Shape: ShapeLabel(m), LogicalRequests: f.Demand[m].Requests, QueuedRequests: f.Demand[m].Queued, OfferedRPS: f.Demand[m].Rate, CapacityRPS: coverage.Ready[m], PendingRPS: coverage.Future[m], ProtectedFloor: floor(f, ModelID(m)), WarmProviders: coverage.Warm[ModelID(m)], EligibleIdle: eligible, DeficitRPS: max(0, coverage.Need[m]-coverage.Ready[m]-coverage.Future[m])})
 	}
 	return s
 }
